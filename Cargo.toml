@@ -5,5 +5,8 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
+dirs = "5"
 env_logger = "0.11.11"
 log = "0.4.33"
+serde = { version = "1", features = ["derive"] }
+serde_yml = "0.0.13"
