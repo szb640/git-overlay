@@ -4,9 +4,9 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-clap = { version = "4", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive"] }
 dirs = "5"
 env_logger = "0.11.11"
+figment = { version = "0.10", default-features = false, features = ["env", "yaml"] }
 log = "0.4.33"
 serde = { version = "1", features = ["derive"] }
-serde_yml = "0.0.13"

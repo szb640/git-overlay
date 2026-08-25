@@ -1,8 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
-use log::warn;
-use serde::Deserialize;
+use clap::Parser;
+use figment::providers::{Env, Format, Serialized, Yaml};
+use figment::Figment;
+use log::{error, info};
+use serde::{Deserialize, Serialize};
 
 /// Path to the configuration file, relative to the user config directory.
 const CONFIG_FILE: &str = "config.yml";
@@ -15,35 +17,37 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Path to the overlay repository. Falls back to the GIT_OVERLAY_PATH
+    /// Path to the overlay repository. Falls back to the GIT_OVERLAY_OVERLAY_PATH
     /// environment variable, then to the config file.
-    #[arg(long, global = true, env = "GIT_OVERLAY_PATH")]
+    #[arg(long, global = true)]
     overlay_path: Option<PathBuf>,
 
     /// Root directory containing the repositories to sync. Falls back to the
     /// GIT_OVERLAY_REPOSITORY_ROOT environment variable, then to the config
     /// file.
-    #[arg(long, global = true, env = "GIT_OVERLAY_REPOSITORY_ROOT")]
+    #[arg(long, global = true)]
     repository_root: Option<PathBuf>,
 
     #[command(subcommand)]
     action: Action,
 }
 
-#[derive(Subcommand)]
+#[derive(Parser)]
 enum Action {
     /// Sync repositories
-    Sync {
-    },
+    Sync {},
 }
 
-/// The parsed contents of the config file. Unknown fields are ignored so the
-/// file can grow over time without breaking older binaries.
-#[derive(Deserialize, Default)]
-struct Config {
-    #[serde(alias = "overlay_repo")]
-    overlay_path: Option<String>,
-    repository_root: Option<String>,
+/// A single configuration setting that may come from the config file, the
+/// GIT_OVERLAY_* environment, or the CLI. Each source only contributes the
+/// fields it actually sets (None fields are skipped on serialize), so a
+/// lower-precedence source is never clobbered by an unset higher one.
+#[derive(Serialize, Deserialize, Default)]
+struct Settings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    overlay_path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repository_root: Option<PathBuf>,
 }
 
 /// Returns the path to the config file, e.g.
@@ -54,35 +58,42 @@ fn config_path() -> Option<PathBuf> {
     Some(dir.join("git-overlay").join(CONFIG_FILE))
 }
 
-/// Reads `overlay_path` from the config file, if present and valid.
-fn overlay_path_from_config() -> Option<PathBuf> {
-    let path = config_path()?;
-    load_config(&path).and_then(|c| c.overlay_path.map(PathBuf::from))
-}
+/// Builds the layered configuration and resolves the effective settings.
+///
+/// Precedence, lowest to highest: built-in defaults, config file, the
+/// GIT_OVERLAY_* environment variables, then CLI flags.
+///
+/// Errors if the configuration cannot be resolved, or if `overlay_path` or
+/// `repository_root` were never set by any source.
+fn settings(cli: &Cli) -> Result<Settings, String> {
+    let mut figment = Figment::new().merge(Serialized::defaults(&Settings::default()));
 
-/// Reads `repository_root` from the config file, if present and valid.
-fn repository_root_from_config() -> Option<PathBuf> {
-    let path = config_path()?;
-    load_config(&path).and_then(|c| c.repository_root.map(PathBuf::from))
-}
-
-fn load_config(path: &Path) -> Option<Config> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => {
-            warn!("could not read config {}: {e}", path.display());
-            return None;
-        }
-    };
-
-    match serde_yml::from_str::<Config>(&content) {
-        Ok(config) => Some(config),
-        Err(e) => {
-            warn!("invalid config {}: {e}", path.display());
-            None
-        }
+    if let Some(path) = config_path() {
+        figment = figment.merge(Yaml::file(path));
     }
+
+    figment = figment.merge(Env::prefixed("GIT_OVERLAY_"));
+    figment = figment.merge(Serialized::defaults(&Settings {
+        overlay_path: cli.overlay_path.clone(),
+        repository_root: cli.repository_root.clone(),
+    }));
+
+    let settings: Settings = figment
+        .extract()
+        .map_err(|e| format!("failed to resolve configuration: {e}"))?;
+
+    if settings.overlay_path.is_none() {
+        return Err("overlay_path is not defined (set it via --overlay-path, the \
+GIT_OVERLAY_OVERLAY_PATH environment variable, or the config file)"
+            .into());
+    }
+    if settings.repository_root.is_none() {
+        return Err("repository_root is not defined (set it via --repository-root, the \
+GIT_OVERLAY_REPOSITORY_ROOT environment variable, or the config file)"
+            .into());
+    }
+
+    Ok(settings)
 }
 
 fn main() {
@@ -92,19 +103,23 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_level))
         .init();
 
-    // Precedence: CLI flag > GIT_OVERLAY_PATH env var (both handled by clap) >
-    // config file.
-    let overlay_path = cli.overlay_path.or_else(overlay_path_from_config);
-
-    let repository_root = cli
-        .repository_root
-        .or_else(repository_root_from_config);
+    let settings = match settings(&cli) {
+        Ok(settings) => settings,
+        Err(e) => {
+            error!("{e}");
+            std::process::exit(1);
+        }
+    };
 
     match cli.action {
-        Action::Sync {} => println!(
-            "TODO: overlay_path={}, repository_root={}",
-            overlay_path.map_or("none".into(), |p| p.to_string_lossy().into_owned()),
-            repository_root.map_or("none".into(), |p| p.to_string_lossy().into_owned())
+        Action::Sync {} => info!(
+            "overlay_path={}, repository_root={}",
+            settings
+                .overlay_path
+                .map_or("none".into(), |p| p.to_string_lossy().into_owned()),
+            settings
+                .repository_root
+                .map_or("none".into(), |p| p.to_string_lossy().into_owned())
         ),
     }
 }
