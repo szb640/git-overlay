@@ -6,6 +6,9 @@ use figment::Figment;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 
+mod import;
+mod overlay;
+
 /// Path to the configuration file, relative to the user config directory.
 const CONFIG_FILE: &str = "config.yml";
 
@@ -36,6 +39,13 @@ struct Cli {
 enum Action {
     /// Sync repositories
     Sync {},
+
+    /// Import a repository from a local directory into the overlay
+    Import {
+        /// Symlink the directory into the overlay rather than copying it
+        #[arg(short, long)]
+        link: bool,
+    },
 }
 
 /// A single configuration setting that may come from the config file, the
@@ -112,6 +122,12 @@ fn main() {
     };
 
     match cli.action {
+        Action::Import { link: _ } => {
+            if let Err(e) = import::run_import(&settings) {
+                error!("{e}");
+                std::process::exit(1);
+            }
+        }
         Action::Sync {} => info!(
             "overlay_path={}, repository_root={}",
             settings
