@@ -1,0 +1,17 @@
+* Remaining
+
+The idea is two have a semi-smart two-way sync:
+- We check which was the last revision that was synced from overlay
+- Look at the changes in overlay since then
+- Make the same changes in the repo with paths rewritten
+  - How to handle merge conflicts?
+- Add new files into private exclude
+- Copy the special untracked files into the overlay repo
+  - How to handle uncommitted changes? Include workspace changes in diff above? How to track those?
+
+    When importing:
+    - Add workspace changes to overlay repo
+      - Doesn't include private changes... Temporarily change private excludes? Those will be listed as adds...
+      - They cannot be modify,  just add files...
+        - Force overlay subdir to have only the files that are listed as add in the diff in the proper subdir maybe?
+    - Add new files into private exclude

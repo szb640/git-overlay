@@ -6,6 +6,7 @@ use figment::Figment;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 
+mod exclude;
 mod import;
 mod overlay;
 

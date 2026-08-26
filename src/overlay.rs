@@ -39,6 +39,7 @@ impl OverlayTarget {
             ));
         }
 
+        
         // Resolve the Git root first: since `dir` sits inside this root, and
         // we check below that the root is inside `repository_root`, `dir` is
         // guaranteed to be inside it too, so no separate check is needed.
