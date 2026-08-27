@@ -21,11 +21,11 @@ pub struct ExcludeFile {
     path: PathBuf,
     /// The patterns between the guard clauses, loaded by [`Self::load`].
     patterns: Vec<String>,
-    /// Everything up to and including the opening guard (empty if the guards
-    /// are absent), preserved verbatim across writes.
+    /// Everything up to (but not including) the opening guard, preserved
+    /// verbatim across writes. Empty if there is no such content.
     head: String,
-    /// Everything from the closing guard to the end (empty if the guards are
-    /// absent), preserved verbatim across writes.
+    /// Everything after (but not including) the closing guard, preserved
+    /// verbatim across writes. Empty if there is no such content.
     tail: String,
 }
 
@@ -59,14 +59,16 @@ impl ExcludeFile {
 
         match (open, close) {
             (Some(o), Some(c)) if o < c => {
-                self.head = lines[..=o].join("\n") + "\n";
-                self.tail = lines[c..].join("\n") + "\n";
+                // `head`/`tail` exclude the guard lines themselves; [`Self::write`]
+                // re-emits them on save.
+                self.head = join_lines(&lines[..o]);
+                self.tail = join_lines(&lines[c + 1..]);
                 self.patterns = lines[o + 1..c].iter().map(|s| uncomment(s)).collect();
             }
             _ => {
                 // No (valid) guards yet: nothing managed, keep the whole file
                 // as surrounding content.
-                self.head = content + "\n";
+                self.head = content.to_string();
                 self.tail = String::new();
                 self.patterns = Vec::new();
             }
@@ -75,15 +77,22 @@ impl ExcludeFile {
         Ok(())
     }
 
-    /// Writes `lines` into the managed region, replacing anything currently
-    /// there while leaving the surrounding content (`head`/`tail`) intact.
+    /// Writes `lines` into the managed region, wrapping them in the guard
+    /// clauses and leaving the surrounding content (`head`/`tail`) intact.
     fn write(&self, lines: &[String]) -> Result<(), String> {
         let mut out = String::new();
         out.push_str(&self.head);
+        if !self.head.is_empty() && !self.head.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(OPEN_GUARD);
+        out.push('\n');
         for line in lines {
             out.push_str(line);
             out.push('\n');
         }
+        out.push_str(CLOSE_GUARD);
+        out.push('\n');
         out.push_str(&self.tail);
 
         std::fs::write(&self.path, out)
@@ -145,4 +154,15 @@ fn uncomment(line: &str) -> String {
         Some(rest) => rest.trim().to_string(),
         None => line.to_string(),
     }
+}
+
+/// Joins `lines` into a single string, each followed by a newline. Returns an
+/// empty string for an empty slice.
+fn join_lines(lines: &[&str]) -> String {
+    let mut s = String::new();
+    for line in lines {
+        s.push_str(line);
+        s.push('\n');
+    }
+    s
 }

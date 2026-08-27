@@ -16,5 +16,9 @@ pub fn run_info(settings: &Settings) -> Result<(), String> {
         info!("exclude_pattern={pattern}");
     }
 
+    for path in target.excluded_files()? {
+        info!("overlay_file={}", path.display());
+    }
+
     Ok(())
 }

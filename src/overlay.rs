@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use ignore::WalkBuilder;
+use ignore::gitignore::GitignoreBuilder;
+
 use crate::exclude::ExcludeFile;
 
 /// A repository to be overlaid into the overlay repository.
@@ -98,6 +101,42 @@ impl OverlayTarget {
     /// (`.git/info/exclude`).
     pub fn exclude_mut(&mut self) -> &mut ExcludeFile {
         &mut self.exclude
+    }
+
+    /// Returns the absolute paths of all files in the repository that match
+    /// the exclude patterns managed by this target's private ignore file.
+    pub fn excluded_files(&self) -> Result<Vec<PathBuf>, String> {
+        let mut builder = GitignoreBuilder::new(&self.repo_root_abs);
+        for pattern in self.exclude.patterns() {
+            builder
+                .add_line(None, pattern)
+                .map_err(|e| format!("invalid exclude pattern {pattern:?}: {e}"))?;
+        }
+        let matcher = builder
+            .build()
+            .map_err(|e| format!("failed to build exclude matcher: {e}"))?;
+
+        let mut matched = Vec::new();
+        let walker = WalkBuilder::new(&self.repo_root_abs)
+            .hidden(false)
+            .git_ignore(false)
+            .git_exclude(false)
+            .git_global(false)
+            .parents(false)
+            .build();
+
+        for entry in walker {
+            let entry = entry.map_err(|e| format!("failed to walk repository: {e}"))?;
+            let is_dir = entry.file_type().map_or(false, |t| t.is_dir());
+            if is_dir {
+                continue;
+            }
+            if matcher.matched(entry.path(), false).is_ignore() {
+                matched.push(entry.path().to_path_buf());
+            }
+        }
+
+        Ok(matched)
     }
 }
 

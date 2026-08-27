@@ -3,8 +3,10 @@
 The idea is two have a semi-smart two-way sync:
 - We check which was the last revision that was synced from overlay
 - Look at the changes in overlay since then
+  - What if there are changes in the workspace?
 - Make the same changes in the repo with paths rewritten
   - How to handle merge conflicts?
+  - What if commits are non-continuous? E.g.: history rewrite with jj?
 - Add new files into private exclude
 - Copy the special untracked files into the overlay repo
   - How to handle uncommitted changes? Include workspace changes in diff above? How to track those?
