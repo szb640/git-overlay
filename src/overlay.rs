@@ -93,6 +93,12 @@ impl OverlayTarget {
     pub fn exclude(&self) -> &ExcludeFile {
         &self.exclude
     }
+
+    /// Mutable access to the repository's private ignore file
+    /// (`.git/info/exclude`).
+    pub fn exclude_mut(&mut self) -> &mut ExcludeFile {
+        &mut self.exclude
+    }
 }
 
 /// Canonicalizes a path, erroring if it does not exist.

@@ -6,6 +6,7 @@ use figment::Figment;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 
+mod add;
 mod exclude;
 mod import;
 mod info;
@@ -44,6 +45,13 @@ enum Action {
 
     /// Show info about a repository, including its private exclude patterns
     Info {},
+
+    /// Add patterns to the private exclude list and save
+    Add {
+        /// Pattern(s) to add to the private ignore list
+        #[arg(required = true)]
+        patterns: Vec<String>,
+    },
 
     /// Import a repository from a local directory into the overlay
     Import {
@@ -129,6 +137,12 @@ fn main() {
     match cli.action {
         Action::Info {} => {
             if let Err(e) = info::run_info(&settings) {
+                error!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Action::Add { patterns } => {
+            if let Err(e) = add::run_add(&settings, &patterns) {
                 error!("{e}");
                 std::process::exit(1);
             }
