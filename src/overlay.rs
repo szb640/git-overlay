@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::exclude::ExcludeFile;
+
 /// A repository to be overlaid into the overlay repository.
 pub struct OverlayTarget {
     /// Relative path to the repository root (relative to `repository_root`).
@@ -8,6 +10,8 @@ pub struct OverlayTarget {
     repo_root_abs: PathBuf,
     /// Relative path inside the Git folder (relative to the repository root).
     directory: PathBuf,
+    /// This repository's private ignore file (`.git/info/exclude`).
+    exclude: ExcludeFile,
 }
 
 impl OverlayTarget {
@@ -60,10 +64,13 @@ impl OverlayTarget {
             )
         })?;
 
+        let exclude = ExcludeFile::load(&repo_root_abs)?;
+
         Ok(Self {
             repo_root: repo_root.to_path_buf(),
             repo_root_abs,
             directory: directory.to_path_buf(),
+            exclude,
         })
     }
 
@@ -80,6 +87,11 @@ impl OverlayTarget {
     /// Relative path inside the Git folder.
     pub fn directory(&self) -> &Path {
         &self.directory
+    }
+
+    /// The repository's private ignore file (`.git/info/exclude`).
+    pub fn exclude(&self) -> &ExcludeFile {
+        &self.exclude
     }
 }
 

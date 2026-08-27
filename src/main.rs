@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 mod exclude;
 mod import;
+mod info;
 mod overlay;
 
 /// Path to the configuration file, relative to the user config directory.
@@ -40,6 +41,9 @@ struct Cli {
 enum Action {
     /// Sync repositories
     Sync {},
+
+    /// Show info about a repository, including its private exclude patterns
+    Info {},
 
     /// Import a repository from a local directory into the overlay
     Import {
@@ -123,6 +127,12 @@ fn main() {
     };
 
     match cli.action {
+        Action::Info {} => {
+            if let Err(e) = info::run_info(&settings) {
+                error!("{e}");
+                std::process::exit(1);
+            }
+        }
         Action::Import { link: _ } => {
             if let Err(e) = import::run_import(&settings) {
                 error!("{e}");
