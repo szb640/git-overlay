@@ -7,10 +7,9 @@ use log::{error, info};
 use serde::{Deserialize, Serialize};
 
 mod add;
-mod exclude;
+mod engine;
 mod import;
 mod info;
-mod overlay;
 mod reset;
 
 /// Path to the configuration file, relative to the user config directory.

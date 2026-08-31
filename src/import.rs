@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use log::info;
 
-use crate::overlay::OverlayTarget;
+use crate::engine::BaseRepository;
 use crate::Settings;
 
 /// Returns the absolute, canonicalized current working directory.
@@ -11,11 +11,11 @@ fn current_dir() -> Result<PathBuf, String> {
 }
 
 /// Imports the current directory into the overlay.
-pub fn import_path(settings: &Settings) -> Result<OverlayTarget, String> {
+pub fn import_path(settings: &Settings) -> Result<BaseRepository, String> {
     let root = settings.repository_root.as_ref().unwrap();
     let dir = current_dir()?;
 
-    OverlayTarget::new(root, &dir)
+    BaseRepository::new(root, &dir)
 }
 
 /// Imports the current directory into the overlay.

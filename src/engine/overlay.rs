@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use ignore::WalkBuilder;
 use ignore::gitignore::GitignoreBuilder;
 
-use crate::exclude::ExcludeFile;
+use crate::engine::exclude::ExcludeFile;
 
 /// A repository to be overlaid into the overlay repository.
-pub struct OverlayTarget {
+pub struct BaseRepository {
     /// Relative path to the repository root (relative to `repository_root`).
     repo_root: PathBuf,
     /// Absolute path to the repository root on disk.
@@ -17,7 +17,7 @@ pub struct OverlayTarget {
     exclude: ExcludeFile,
 }
 
-impl OverlayTarget {
+impl BaseRepository {
     /// Constructs an overlay target for the current directory inside
     /// `repository_root`, computing all of its path fields.
     pub fn new(repository_root: &Path, directory: &Path) -> Result<Self, String> {

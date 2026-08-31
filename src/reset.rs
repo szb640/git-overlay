@@ -1,6 +1,6 @@
 use log::info;
 
-use crate::overlay::OverlayTarget;
+use crate::engine::BaseRepository;
 use crate::Settings;
 
 /// Runs the `reset` subcommand: deletes every file that matched the exclude
@@ -10,7 +10,7 @@ pub fn run_reset(settings: &Settings) -> Result<(), String> {
     let dir =
         std::env::current_dir().map_err(|e| format!("failed to get current directory: {e}"))?;
 
-    let mut target = OverlayTarget::new(root, &dir)?;
+    let mut target = BaseRepository::new(root, &dir)?;
 
     for path in target.excluded_files()? {
         std::fs::remove_file(&path)
