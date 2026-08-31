@@ -11,6 +11,7 @@ mod exclude;
 mod import;
 mod info;
 mod overlay;
+mod reset;
 
 /// Path to the configuration file, relative to the user config directory.
 const CONFIG_FILE: &str = "config.yml";
@@ -52,6 +53,9 @@ enum Action {
         #[arg(required = true)]
         patterns: Vec<String>,
     },
+
+    /// Delete files matching the exclude patterns and clear them
+    Reset {},
 
     /// Import a repository from a local directory into the overlay
     Import {
@@ -137,6 +141,12 @@ fn main() {
     match cli.action {
         Action::Info {} => {
             if let Err(e) = info::run_info(&settings) {
+                error!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Action::Reset {} => {
+            if let Err(e) = reset::run_reset(&settings) {
                 error!("{e}");
                 std::process::exit(1);
             }

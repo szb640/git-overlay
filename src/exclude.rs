@@ -128,6 +128,12 @@ impl ExcludeFile {
         self.patterns.retain(|p| p != pattern);
     }
 
+    /// Clears the in-memory list of patterns. Does not touch the file until
+    /// [`Self::save`] is called.
+    pub fn clear(&mut self) {
+        self.patterns.clear();
+    }
+
     /// Writes the current in-memory patterns to the managed region (as plain,
     /// uncommented patterns), leaving the surrounding content intact.
     pub fn save(&self) -> Result<(), String> {
