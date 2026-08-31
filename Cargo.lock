@@ -286,6 +286,7 @@ dependencies = [
  "ignore",
  "log",
  "serde",
+ "serde_yaml",
 ]
 
 [[package]]

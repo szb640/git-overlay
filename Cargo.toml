@@ -11,3 +11,4 @@ figment = { version = "0.10", default-features = false, features = ["env", "yaml
 ignore = "0.4.33"
 log = "0.4.33"
 serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"

@@ -4,6 +4,7 @@ use ignore::WalkBuilder;
 use ignore::gitignore::GitignoreBuilder;
 
 use crate::engine::exclude::ExcludeFile;
+use crate::engine::RepositoryConfiguration;
 
 /// A repository to be overlaid into the overlay repository.
 pub struct BaseRepository {
@@ -15,6 +16,8 @@ pub struct BaseRepository {
     directory: PathBuf,
     /// This repository's private ignore file (`.git/info/exclude`).
     exclude: ExcludeFile,
+    /// This repository's YAML configuration file (`.git-overlay/config.yml`).
+    config: RepositoryConfiguration,
 }
 
 impl BaseRepository {
@@ -68,12 +71,14 @@ impl BaseRepository {
         })?;
 
         let exclude = ExcludeFile::load(&repo_root_abs)?;
+        let config = RepositoryConfiguration::load(&repo_root_abs)?;
 
         Ok(Self {
             repo_root: repo_root.to_path_buf(),
             repo_root_abs,
             directory: directory.to_path_buf(),
             exclude,
+            config,
         })
     }
 
@@ -101,6 +106,18 @@ impl BaseRepository {
     /// (`.git/info/exclude`).
     pub fn exclude_mut(&mut self) -> &mut ExcludeFile {
         &mut self.exclude
+    }
+
+    /// The repository's YAML configuration file
+    /// (`.git-overlay/config.yml`).
+    pub fn config(&self) -> &RepositoryConfiguration {
+        &self.config
+    }
+
+    /// Mutable access to the repository's YAML configuration file
+    /// (`.git-overlay/config.yml`).
+    pub fn config_mut(&mut self) -> &mut RepositoryConfiguration {
+        &mut self.config
     }
 
     /// Returns the absolute paths of all files in the repository that match
