@@ -99,16 +99,19 @@ impl BaseRepository {
     }
 
     /// Removes each pattern from the repository's private ignore file
-    /// (`.git/info/exclude`) and writes it to disk in a single save.
+    /// (`.git/info/exclude`) and from the overlay directory's ignore
+    /// patterns, writing both to disk in a single save each.
     pub fn remove_patterns(
         &mut self,
         patterns: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<(), String> {
         self.ensure_initialized()?;
-        for pattern in patterns {
-            self.exclude.remove(&pattern.into());
+        let patterns: Vec<String> = patterns.into_iter().map(Into::into).collect();
+        for pattern in &patterns {
+            self.exclude.remove(pattern);
         }
-        self.exclude.save()
+        self.exclude.save()?;
+        self.overlay.remove_patterns(patterns)
         // TODO: Remove links, move files from overlay.
     }
 

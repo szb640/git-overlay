@@ -99,23 +99,6 @@ impl ExcludeFile {
             .map_err(|e| format!("failed to write {}: {e}", self.path.display()))
     }
 
-    /// Writes each current pattern to the file commented out, effectively
-    /// disabling the ignores while preserving the list. The surrounding
-    /// content is left unchanged.
-    pub fn freeze(&self) -> Result<(), String> {
-        let commented: Vec<String> = self.patterns.iter().map(|p| format!("# {p}")).collect();
-        self.write(&commented)
-    }
-
-    /// Writes each pattern to the file as-is (no comments), effectively
-    /// restoring the active ignores. Only the managed region is written; the
-    /// surrounding content is left unchanged. If the in-memory patterns were
-    /// loaded from a frozen (commented) file they are already uncommented by
-    /// [`Self::load`], so this writes the plain patterns.
-    pub fn unfreeze(&self) -> Result<(), String> {
-        self.write(&self.patterns)
-    }
-
     /// Appends a pattern to the in-memory list. Does not touch the file until
     /// [`Self::save`] is called; duplicates are not filtered.
     pub fn add(&mut self, pattern: impl Into<String>) {
@@ -138,11 +121,6 @@ impl ExcludeFile {
     /// uncommented patterns), leaving the surrounding content intact.
     pub fn save(&self) -> Result<(), String> {
         self.write(&self.patterns)
-    }
-
-    /// Returns the repository root this file belongs to.
-    pub fn root(&self) -> &Path {
-        &self.root
     }
 
     /// Returns the patterns between the guard clauses.
