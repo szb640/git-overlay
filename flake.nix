@@ -14,7 +14,7 @@
 
       src = ./.;
 
-      cargoHash = "sha256-Nmw5KPtlCICOl3APbanTO2qhC1UbmGlGu2lX+k/CZIg=";
+      cargoHash = "sha256-L3cgFz5fWTDyWjxA3Tr9XWIQ5h0BieCX4Pw4FOjubEw=";
 
       meta = {
         description = "Software for overlaying personal files onto a git repository";
