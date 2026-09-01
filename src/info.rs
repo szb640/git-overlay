@@ -12,7 +12,7 @@ pub fn run_info(settings: &Settings) -> Result<(), String> {
 
     let target = BaseRepository::new(root, &dir)?;
 
-    for pattern in target.exclude().patterns() {
+    for pattern in target.list_patterns() {
         info!("exclude_pattern={pattern}");
     }
 

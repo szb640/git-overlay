@@ -13,11 +13,10 @@ pub fn run_add(settings: &Settings, patterns: &[String]) -> Result<(), String> {
 
     let mut target = BaseRepository::new(root, &dir)?;
 
+    target.add_patterns(patterns.iter())?;
     for pattern in patterns {
-        target.exclude_mut().add(pattern.clone());
         info!("added exclude_pattern={pattern}");
     }
 
-    target.exclude_mut().save()?;
     Ok(())
 }

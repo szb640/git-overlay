@@ -97,27 +97,61 @@ impl BaseRepository {
         &self.directory
     }
 
-    /// The repository's private ignore file (`.git/info/exclude`).
-    pub fn exclude(&self) -> &ExcludeFile {
-        &self.exclude
-    }
-
-    /// Mutable access to the repository's private ignore file
+    /// Returns the patterns in the repository's private ignore file
     /// (`.git/info/exclude`).
-    pub fn exclude_mut(&mut self) -> &mut ExcludeFile {
-        &mut self.exclude
+    pub fn list_patterns(&self) -> &[String] {
+        self.exclude.patterns()
     }
 
-    /// The repository's YAML configuration file
-    /// (`.git-overlay/config.yml`).
-    pub fn config(&self) -> &RepositoryConfiguration {
-        &self.config
+    /// Appends each pattern to the repository's private ignore file
+    /// (`.git/info/exclude`) and writes it to disk in a single save.
+    pub fn add_patterns(
+        &mut self,
+        patterns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<(), String> {
+        self.ensure_initialized()?;
+        for pattern in patterns {
+            self.exclude.add(pattern);
+        }
+        self.exclude.save()
     }
 
-    /// Mutable access to the repository's YAML configuration file
-    /// (`.git-overlay/config.yml`).
-    pub fn config_mut(&mut self) -> &mut RepositoryConfiguration {
-        &mut self.config
+    /// Removes all patterns from the repository's private ignore file
+    /// (`.git/info/exclude`) and writes it to disk.
+    pub fn clear_patterns(&mut self) -> Result<(), String> {
+        self.ensure_initialized()?;
+        self.exclude.clear();
+        self.exclude.save()
+    }
+
+    /// Returns an error if the repository has not been initialized (i.e. its
+    /// configuration file does not exist yet).
+    fn ensure_initialized(&self) -> Result<(), String> {
+        if self.config.exists() {
+            Ok(())
+        } else {
+            Err(format!(
+                "repository {} is not initialized; run init first",
+                self.repo_root_abs.display()
+            ))
+        }
+    }
+
+
+    /// Initializes the repository: fails if it is already initialized, and
+    /// otherwise writes the configuration file with the overlay path set to
+    /// `overlay_path` and saves an empty exclude file.
+    pub fn init(&mut self, overlay_path: impl Into<PathBuf>) -> Result<(), String> {
+        if self.config.exists() {
+            return Err(format!(
+                "repository {} is already initialized with overlay path {}",
+                self.repo_root_abs.display(),
+                self.config.overlay_directory().display()
+            ));
+        }
+        self.config.set_overlay_directory(overlay_path.into());
+        self.config.save()?;
+        self.exclude.save()
     }
 
     /// Returns the absolute paths of all files in the repository that match

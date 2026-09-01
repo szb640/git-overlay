@@ -18,8 +18,7 @@ pub fn run_reset(settings: &Settings) -> Result<(), String> {
         info!("removed file={}", path.display());
     }
 
-    target.exclude_mut().clear();
-    target.exclude_mut().save()?;
+    target.clear_patterns()?;
 
     Ok(())
 }

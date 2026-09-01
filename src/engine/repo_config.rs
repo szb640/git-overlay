@@ -16,8 +16,15 @@ pub struct RepositoryConfiguration {
     /// Repository root this configuration was loaded for. Not serialized.
     #[serde(skip)]
     root: PathBuf,
+    /// Whether the configuration file existed on disk when loaded. Not
+    /// serialized. `false` for a default config whose file has not been
+    /// written yet.
+    #[serde(skip)]
+    exists: bool,
     /// Path to the overlay directory, relative to the repository root.
     overlay_directory: PathBuf,
+    /// Files managed by the overlay tool, relative to the repository root.
+    managed_files: Vec<String>,
 }
 
 impl RepositoryConfiguration {
@@ -26,7 +33,9 @@ impl RepositoryConfiguration {
     fn default_with(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
+            exists: false,
             overlay_directory: PathBuf::new(),
+            managed_files: Vec::new(),
         }
     }
 
@@ -47,6 +56,7 @@ impl RepositoryConfiguration {
                     format!("failed to parse {}: {e}", path.display())
                 })?;
                 config.root = root.to_path_buf();
+                config.exists = true;
                 Ok(config)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default_with(root)),
@@ -82,6 +92,33 @@ impl RepositoryConfiguration {
     /// Sets the overlay directory path, relative to the repository root.
     pub fn set_overlay_directory(&mut self, path: impl Into<PathBuf>) {
         self.overlay_directory = path.into();
+    }
+
+    /// Whether the configuration file existed on disk when this instance was
+    /// loaded. A default config that has never been saved reports `false`.
+    pub fn exists(&self) -> bool {
+        self.exists
+    }
+
+    /// The files managed by the overlay tool, relative to the repository
+    /// root.
+    pub fn managed_files(&self) -> &[String] {
+        &self.managed_files
+    }
+
+    /// Registers a file as managed by the overlay tool, if not already
+    /// present.
+    pub fn add_managed_file(&mut self, file: impl Into<String>) {
+        let file = file.into();
+        if !self.managed_files.iter().any(|f| f == &file) {
+            self.managed_files.push(file);
+        }
+    }
+
+    /// Removes a file from the managed files list.
+    pub fn remove_managed_file(&mut self, file: impl Into<String>) {
+        let file = file.into();
+        self.managed_files.retain(|f| f != &file);
     }
 }
 
