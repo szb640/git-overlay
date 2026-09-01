@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use figment::providers::{Env, Format, Serialized, Yaml};
 use figment::Figment;
-use log::{error, info};
+use log::error;
 use serde::{Deserialize, Serialize};
 
 mod add;
@@ -11,6 +11,7 @@ mod engine;
 mod import;
 mod info;
 mod reset;
+mod sync;
 
 /// Path to the configuration file, relative to the user config directory.
 const CONFIG_FILE: &str = "config.yml";
@@ -138,6 +139,12 @@ fn main() {
     };
 
     match cli.action {
+        Action::Sync {} => {
+            if let Err(e) = sync::run_sync(&settings) {
+                error!("{e}");
+                std::process::exit(1);
+            }
+        }
         Action::Info {} => {
             if let Err(e) = info::run_info(&settings) {
                 error!("{e}");
@@ -162,14 +169,5 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Action::Sync {} => info!(
-            "overlay_path={}, repository_root={}",
-            settings
-                .overlay_path
-                .map_or("none".into(), |p| p.to_string_lossy().into_owned()),
-            settings
-                .repository_root
-                .map_or("none".into(), |p| p.to_string_lossy().into_owned())
-        ),
     }
 }

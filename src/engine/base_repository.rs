@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
 use ignore::gitignore::GitignoreBuilder;
+use log::info;
 
 use crate::engine::exclude::ExcludeFile;
-use crate::engine::RepositoryConfiguration;
+use crate::engine::{OverlayDirectory, RepositoryConfiguration};
 
 /// A repository to be overlaid into the overlay repository.
 pub struct BaseRepository {
@@ -18,6 +19,9 @@ pub struct BaseRepository {
     exclude: ExcludeFile,
     /// This repository's YAML configuration file (`.git-overlay/config.yml`).
     config: RepositoryConfiguration,
+    /// This repository's overlay destination (`.git-overlay.yml` rooted in
+    /// the overlay directory).
+    overlay: OverlayDirectory,
 }
 
 impl BaseRepository {
@@ -72,6 +76,7 @@ impl BaseRepository {
 
         let exclude = ExcludeFile::load(&repo_root_abs)?;
         let config = RepositoryConfiguration::load(&repo_root_abs)?;
+        let overlay = OverlayDirectory::new(&repo_root_abs.join(config.overlay_directory()))?;
 
         Ok(Self {
             repo_root: repo_root.to_path_buf(),
@@ -79,6 +84,7 @@ impl BaseRepository {
             directory: directory.to_path_buf(),
             exclude,
             config,
+            overlay,
         })
     }
 
@@ -104,16 +110,32 @@ impl BaseRepository {
     }
 
     /// Appends each pattern to the repository's private ignore file
-    /// (`.git/info/exclude`) and writes it to disk in a single save.
+    /// (`.git/info/exclude`) and to the overlay directory's ignore patterns,
+    /// writing both to disk in a single save each.
     pub fn add_patterns(
         &mut self,
         patterns: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<(), String> {
         self.ensure_initialized()?;
-        for pattern in patterns {
-            self.exclude.add(pattern);
+
+        // Drop patterns already present in the exclude file, and any
+        // duplicates within the batch itself.
+        let existing: Vec<String> = self.exclude.patterns().to_vec();
+        let mut seen = std::collections::HashSet::new();
+        let mut unique: Vec<String> = Vec::new();
+        for pattern in patterns.into_iter().map(Into::into) {
+            if existing.contains(&pattern) || !seen.insert(pattern.clone()) {
+                continue;
+            }
+            unique.push(pattern);
         }
-        self.exclude.save()
+
+        for pattern in &unique {
+            self.exclude.add(pattern.clone());
+        }
+        self.exclude.save()?;
+        self.overlay.add_patterns(unique)
+        // TODO: Add files to overlay
     }
 
     /// Removes all patterns from the repository's private ignore file
@@ -124,17 +146,34 @@ impl BaseRepository {
         self.exclude.save()
     }
 
+    /// Removes each pattern from the repository's private ignore file
+    /// (`.git/info/exclude`) and writes it to disk in a single save.
+    pub fn remove_patterns(
+        &mut self,
+        patterns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<(), String> {
+        self.ensure_initialized()?;
+        for pattern in patterns {
+            self.exclude.remove(&pattern.into());
+        }
+        self.exclude.save()
+        // TODO: Remove links, move files from overlay.
+    }
+
     /// Returns an error if the repository has not been initialized (i.e. its
-    /// configuration file does not exist yet).
-    fn ensure_initialized(&self) -> Result<(), String> {
-        if self.config.exists() {
-            Ok(())
-        } else {
-            Err(format!(
+    /// configuration file does not exist yet). Otherwise refreshes the
+    /// in-memory [`OverlayDirectory`] from the configured overlay path.
+    fn ensure_initialized(&mut self) -> Result<(), String> {
+        if !self.config.exists() {
+            return Err(format!(
                 "repository {} is not initialized; run init first",
                 self.repo_root_abs.display()
-            ))
+            ));
         }
+        self.overlay = OverlayDirectory::new(
+            &self.repo_root_abs.join(self.config.overlay_directory()),
+        )?;
+        Ok(())
     }
 
 
@@ -151,13 +190,162 @@ impl BaseRepository {
         }
         self.config.set_overlay_directory(overlay_path.into());
         self.config.save()?;
+        self.overlay = OverlayDirectory::new(
+            &self.repo_root_abs.join(self.config.overlay_directory()),
+        )?;
         self.exclude.save()
+    }
+
+    /// Moves each candidate file that is excluded but not yet managed into the
+    /// overlay directory and hard links it back into the repository, then
+    /// registers it in the config. Skips files already recorded as managed.
+    fn sync_added(&mut self, candidates: &[PathBuf]) -> Result<(), String> {
+        let repo_root = &self.repo_root_abs;
+        let overlay_dir = self.overlay.root();
+        let managed: Vec<String> = self.config.managed_files().to_vec();
+
+        for rel in candidates {
+            let rel_str = rel.to_string_lossy().into_owned();
+            if managed.contains(&rel_str) {
+                continue;
+            }
+
+            let file = repo_root.join(rel);
+            let dest = overlay_dir.join(rel);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    format!("failed to create {}: {e}", parent.display())
+                })?;
+            }
+            std::fs::rename(&file, &dest).map_err(|e| {
+                format!("failed to move {} to {}: {e}", file.display(), dest.display())
+            })?;
+            std::fs::hard_link(&dest, &file).map_err(|e| {
+                format!("failed to link {} back to {}: {e}", dest.display(), file.display())
+            })?;
+            info!("moved {} to {}", file.display(), dest.display());
+            self.config.add_managed_file(rel_str);
+        }
+
+        Ok(())
+    }
+
+    /// Removes from the overlay directory any file that is listed as managed
+    /// in the config but no longer among the currently excluded files, and
+    /// unregisters it from the config.
+    fn sync_removed(
+        &mut self,
+        managed: &[String],
+        excluded: &[PathBuf],
+    ) -> Result<(), String> {
+        let overlay_dir = self.overlay.root();
+
+        for rel in managed {
+            let rel_path = Path::new(rel);
+            if excluded.iter().any(|e| e == rel_path) {
+                continue;
+            }
+
+            let dest = overlay_dir.join(&rel_path);
+            std::fs::remove_file(&dest).map_err(|e| {
+                format!("failed to remove {}: {e}", dest.display())
+            })?;
+            info!("removed {} from overlay", dest.display());
+            self.config.remove_managed_file(rel.clone());
+        }
+
+        Ok(())
+    }
+
+    /// Folds any ignore patterns present in the overlay config (but not yet in
+    /// the exclude file) into the repository's private ignore file, keeping
+    /// both sources in sync.
+    fn sync_overlay_patterns(&mut self) -> Result<(), String> {
+        let exclude_patterns: Vec<String> = self.exclude.patterns().to_vec();
+        for pattern in self.overlay.list_patterns() {
+            if exclude_patterns.contains(pattern) {
+                continue;
+            }
+            self.exclude.add(pattern.clone());
+            info!("added exclude_pattern={pattern} from overlay");
+        }
+        self.exclude.save()
+    }
+
+    /// Hard links any overlay files that are not present in the repository
+    /// back into it, at the same relative path.
+    fn sync_overlay_files(&mut self) -> Result<(), String> {
+        let overlay_dir = self.overlay.root();
+        let repo_root = &self.repo_root_abs;
+
+        for file in self.overlay.files()? {
+            let rel = file.strip_prefix(overlay_dir).map_err(|_| {
+                format!("failed to relativize {} to {}", file.display(), overlay_dir.display())
+            })?;
+            let dest = repo_root.join(rel);
+            if dest.exists() {
+                continue;
+            }
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    format!("failed to create {}: {e}", parent.display())
+                })?;
+            }
+            std::fs::hard_link(&file, &dest).map_err(|e| {
+                format!("failed to link {} to {}: {e}", file.display(), dest.display())
+            })?;
+            info!("linked {} to {}", file.display(), dest.display());
+        }
+
+        Ok(())
+    }
+
+    /// Syncs the overlay with the repository's current managed (excluded)
+    /// files. For each file currently excluded but not yet managed, moves it
+    /// into the overlay directory and hard links it back into the repository,
+    /// and registers it in the config. For each file managed in the config but
+    /// no longer excluded, removes it from the overlay directory and
+    /// unregisters it from the config. Only works on initialized repositories.
+    pub fn sync(&mut self) -> Result<(), String> {
+        self.ensure_initialized()?;
+
+        let repo_root = &self.repo_root_abs;
+
+        // Relativized paths of the files currently excluded in the repository.
+        let mut excluded: Vec<PathBuf> = Vec::new();
+        for file in self.excluded_files()? {
+            let rel = file.strip_prefix(repo_root).map_err(|_| {
+                format!("failed to relativize {} to {}", file.display(), repo_root.display())
+            })?;
+            excluded.push(rel.to_path_buf());
+        }
+
+        // In-memory snapshot of the managed list for membership checks, since
+        // it may be mutated below.
+        let managed: Vec<String> = self.config.managed_files().to_vec();
+
+        // Move + hard-link files that are excluded but not yet managed.
+        self.sync_added(&excluded)?;
+
+        // Remove overlay files that are managed but no longer excluded.
+        self.sync_removed(&managed, &excluded)?;
+
+        // TODO: Fix manually added files not covered by exclusion rules as one-offs to overlay_dir exclusion list.
+
+        // Fold any ignore patterns present in the overlay config (but not yet
+        // in the exclude file) into the exclude file.
+        self.sync_overlay_patterns()?;
+
+        // Bring any overlay files that are missing from the repository back in
+        // via hard links.
+        self.sync_overlay_files()?;
+
+        self.config.save()
     }
 
     /// Returns the absolute paths of all files in the repository that match
     /// the exclude patterns managed by this target's private ignore file.
-    pub fn excluded_files(&self) -> Result<Vec<PathBuf>, String> {
-        let mut builder = GitignoreBuilder::new(&self.repo_root_abs);
+    pub fn excluded_files(&self) -> Result<Vec<PathBuf>, String> {        let mut builder = GitignoreBuilder::new(&self.repo_root_abs);
         for pattern in self.exclude.patterns() {
             builder
                 .add_line(None, pattern)
