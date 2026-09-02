@@ -214,6 +214,19 @@ impl BaseRepository {
 
             let file = repo_root.join(rel);
             let dest = overlay_dir.join(rel);
+            // If the overlay already holds its own copy at this path, moving
+            // the repo file over it would destroy the overlay's contents.
+            // Leave both in place and warn instead of clobbering.
+            if dest.exists() {
+                if contents_differ(&dest, &file)? {
+                    warn!(
+                        "{} exists in both the repository and the overlay with different \
+                         contents; leaving both in place and ignoring it",
+                        rel.display()
+                    );
+                }
+                continue;
+            }
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| {
                     format!("failed to create {}: {e}", parent.display())

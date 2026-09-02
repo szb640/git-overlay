@@ -442,3 +442,52 @@ fn sync_with_file_in_both_repo_and_overlay_keeps_both() {
         "`foo.txt` should be ignored by git after `sync`"
     );
 }
+
+#[test]
+fn add_pattern_does_not_clobber_conflicting_overlay_file() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // A file exists in both places with different contents: the repo copy
+    // matches the pattern we are about to add, and the overlay already has
+    // its own conflicting copy.
+    dir.write_file(&repo, "foo.txt", "repo-foo");
+    dir.write_file(&overlay, "foo.txt", "overlay-foo");
+
+    let add = run_add(&repo, &["foo.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add foo.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    // `add` must not clobber the conflicting overlay copy; both versions are
+    // left in place and a warning is emitted.
+    let stderr = String::from_utf8_lossy(&add.stderr);
+    assert!(
+        stderr.contains("both the repository and the overlay")
+            && stderr.contains("leaving both in place"),
+        "`add` did not warn about the out-of-sync `foo.txt`; got: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
+        "repo-foo",
+        "repository copy of `foo.txt` was modified by `add`"
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
+        "overlay-foo",
+        "overlay copy of `foo.txt` was clobbered by `add`"
+    );
+}
