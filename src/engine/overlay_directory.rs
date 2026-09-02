@@ -79,4 +79,44 @@ impl OverlayDirectory {
         }
         self.config.save()
     }
+
+    /// Finds every file in the overlay directory that is not matched by any
+    /// of the configured ignore patterns and adds it as an explicit relative
+    /// path to the ignore patterns, then writes the config to disk in a
+    /// single save.
+    ///
+    /// This "pins" stray files that were added by hand (or by a pattern that
+    /// no longer covers them) so they are acknowledged as managed, rather
+    /// than silently remaining outside the ignore rules.
+    pub fn fix_patterns(&mut self) -> Result<(), String> {
+        let mut builder = ignore::gitignore::GitignoreBuilder::new(&self.root);
+        for pattern in self.config.ignore_patterns() {
+            builder
+                .add_line(None, pattern)
+                .map_err(|e| format!("invalid ignore pattern {pattern:?}: {e}"))?;
+        }
+        let matcher = builder
+            .build()
+            .map_err(|e| format!("failed to build overlay ignore matcher: {e}"))?;
+
+        for file in self.files()? {
+            if matcher.matched(&file, false).is_ignore() {
+                continue;
+            }
+            let rel = file
+                .strip_prefix(&self.root)
+                .map_err(|e| {
+                    format!(
+                        "failed to relativize {} to {}: {e}",
+                        file.display(),
+                        self.root.display()
+                    )
+                })?
+                .to_string_lossy()
+                .into_owned();
+            self.config.add_ignore_pattern(rel);
+        }
+
+        self.config.save()
+    }
 }

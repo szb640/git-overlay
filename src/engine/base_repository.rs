@@ -86,8 +86,26 @@ impl BaseRepository {
             self.exclude.add(pattern.clone());
         }
         self.exclude.save()?;
-        self.overlay.add_patterns(unique)
-        // TODO: Add files to overlay
+        self.overlay.add_patterns(&unique)?;
+
+        // Move + hard-link the files newly matched by these patterns into the
+        // overlay.
+        let repo_root = &self.repo_root_abs;
+        let candidates: Vec<PathBuf> = matching_files(repo_root, &unique)?
+            .map(|path| {
+                let path = path?;
+                path.strip_prefix(repo_root)
+                    .map(Path::to_path_buf)
+                    .map_err(|e| {
+                        format!(
+                            "failed to relativize {} to {}: {e}",
+                            path.display(),
+                            repo_root.display()
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.sync_added(&candidates)
     }
 
     /// Removes all patterns from the repository's private ignore file
@@ -111,8 +129,28 @@ impl BaseRepository {
             self.exclude.remove(pattern);
         }
         self.exclude.save()?;
-        self.overlay.remove_patterns(patterns)
-        // TODO: Remove links, move files from overlay.
+        self.overlay.remove_patterns(&patterns)?;
+
+        // Remove from the overlay any managed files that the removed patterns
+        // no longer exclude.
+        let repo_root = &self.repo_root_abs;
+        let excluded: Vec<PathBuf> = self
+            .excluded_files()?
+            .iter()
+            .map(|file| {
+                file.strip_prefix(repo_root).map(Path::to_path_buf).map_err(
+                    |e| {
+                        format!(
+                            "failed to relativize {} to {}: {e}",
+                            file.display(),
+                            repo_root.display()
+                        )
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let managed: Vec<String> = self.config.managed_files().to_vec();
+        self.sync_removed(&managed, &excluded)
     }
 
     /// Returns an error if the repository has not been initialized (i.e. its
@@ -285,7 +323,7 @@ impl BaseRepository {
         // Remove overlay files that are managed but no longer excluded.
         self.sync_removed(&managed, &excluded)?;
 
-        // TODO: Fix manually added files not covered by exclusion rules as one-offs to overlay_dir exclusion list.
+        self.overlay.fix_patterns()?;
 
         // Fold any ignore patterns present in the overlay config (but not yet
         // in the exclude file) into the exclude file.
@@ -300,38 +338,55 @@ impl BaseRepository {
 
     /// Returns the absolute paths of all files in the repository that match
     /// the exclude patterns managed by this target's private ignore file.
-    pub fn excluded_files(&self) -> Result<Vec<PathBuf>, String> {        let mut builder = GitignoreBuilder::new(&self.repo_root_abs);
-        for pattern in self.exclude.patterns() {
-            builder
-                .add_line(None, pattern)
-                .map_err(|e| format!("invalid exclude pattern {pattern:?}: {e}"))?;
-        }
-        let matcher = builder
-            .build()
-            .map_err(|e| format!("failed to build exclude matcher: {e}"))?;
-
-        let mut matched = Vec::new();
-        let walker = WalkBuilder::new(&self.repo_root_abs)
-            .hidden(false)
-            .git_ignore(false)
-            .git_exclude(false)
-            .git_global(false)
-            .parents(false)
-            .build();
-
-        for entry in walker {
-            let entry = entry.map_err(|e| format!("failed to walk repository: {e}"))?;
-            let is_dir = entry.file_type().map_or(false, |t| t.is_dir());
-            if is_dir {
-                continue;
-            }
-            if matcher.matched(entry.path(), false).is_ignore() {
-                matched.push(entry.path().to_path_buf());
-            }
-        }
-
-        Ok(matched)
+    pub fn excluded_files(&self) -> Result<Vec<PathBuf>, String> {
+        let files = matching_files(&self.repo_root_abs, self.exclude.patterns())?;
+        files.collect()
     }
+}
+
+/// Walks `root` and returns an iterator over the absolute paths of files that
+/// match any of `patterns` (interpreted as gitignore patterns).
+///
+/// Each item is `Ok(path)` for a matching file, or `Err` if walking fails.
+/// Errors while building the matcher (e.g. an invalid pattern) are returned
+/// eagerly.
+fn matching_files<'a>(
+    root: &'a Path,
+    patterns: impl IntoIterator<Item = impl AsRef<str>> + 'a,
+) -> Result<impl Iterator<Item = Result<PathBuf, String>> + 'a, String> {
+    let mut builder = GitignoreBuilder::new(root);
+    for pattern in patterns {
+        builder
+            .add_line(None, pattern.as_ref())
+            .map_err(|e| format!("invalid exclude pattern {:?}: {e}", pattern.as_ref()))?;
+    }
+    let matcher = builder
+        .build()
+        .map_err(|e| format!("failed to build exclude matcher: {e}"))?;
+
+    let walker = WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(false)
+        .git_exclude(false)
+        .git_global(false)
+        .parents(false)
+        .build();
+
+    Ok(walker.filter_map(move |entry| {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => return Some(Err(format!("failed to walk repository: {e}"))),
+        };
+        let is_dir = entry.file_type().map_or(false, |t| t.is_dir());
+        if is_dir {
+            return None;
+        }
+        if matcher.matched(entry.path(), false).is_ignore() {
+            Some(Ok(entry.path().to_path_buf()))
+        } else {
+            None
+        }
+    }))
 }
 
 /// Canonicalizes a path, erroring if it does not exist.
