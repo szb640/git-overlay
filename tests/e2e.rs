@@ -16,6 +16,38 @@ fn run_init(repo: &Path, overlay: &Path) -> std::process::Output {
         .expect("failed to spawn `git-overlay init`")
 }
 
+/// Runs `git-overlay add <patterns...>` in `repo` and returns the command
+/// output, panicking if the process could not be spawned.
+fn run_add(repo: &Path, patterns: &[&str]) -> std::process::Output {
+    Command::new(binary())
+        .arg("add")
+        .args(patterns)
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay add`")
+}
+
+/// Runs `git-overlay sync` in `repo` and returns the command output,
+/// panicking if the process could not be spawned.
+fn run_sync(repo: &Path) -> std::process::Output {
+    Command::new(binary())
+        .arg("sync")
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay sync`")
+}
+
+/// Runs `git-overlay remove <patterns...>` in `repo` and returns the command
+/// output, panicking if the process could not be spawned.
+fn run_remove(repo: &Path, patterns: &[&str]) -> std::process::Output {
+    Command::new(binary())
+        .arg("remove")
+        .args(patterns)
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay remove`")
+}
+
 #[test]
 fn init_records_overlay_path_in_new_repo() {
     let dir = TestDir::new();
@@ -87,5 +119,254 @@ fn init_brings_overlay_file_into_repo_and_ignores_it() {
     assert!(
         status.success(),
         "`hello.txt` is not ignored by git"
+    );
+}
+
+#[test]
+fn add_moves_git_file_into_overlay() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository, an empty overlay directory.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    // Initialize first so the repo is managed.
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Now add a file to the repository that we want to make private.
+    dir.write_file(&repo, "hello.txt", "world");
+
+    let add = run_add(&repo, &["hello.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add hello.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    // The file should now be present in the overlay directory, with its
+    // content preserved.
+    let moved = overlay.join("hello.txt");
+    assert!(
+        moved.is_file(),
+        "`hello.txt` was not added to the overlay directory"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&moved).expect("failed to read overlay `hello.txt`"),
+        "world",
+        "overlay `hello.txt` content does not match the original file"
+    );
+}
+
+#[test]
+fn add_pattern_moves_matching_git_file_into_overlay() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    // Initialize first so the repo is managed.
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Now add a file to the repository that matches the pattern.
+    dir.write_file(&repo, "hello.txt", "world");
+
+    let add = run_add(&repo, &["*.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add *.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    // The matching file should be moved into the overlay directory, with its
+    // content preserved.
+    let moved = overlay.join("hello.txt");
+    assert!(
+        moved.is_file(),
+        "`hello.txt` was not added to the overlay directory via `*.txt`"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&moved).expect("failed to read overlay `hello.txt`"),
+        "world",
+        "overlay `hello.txt` content does not match the original file"
+    );
+}
+
+#[test]
+fn add_does_not_sync_overlay_files_but_sync_does() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Place a file by hand in the overlay, and another in the repository that
+    // we will make managed via `add`.
+    dir.write_file(&overlay, "bar.txt", "bar");
+    dir.write_file(&repo, "foo.txt", "foo");
+
+    let add = run_add(&repo, &["foo.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add foo.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    // `add` only moves the matched repository file into the overlay; it does
+    // not pull overlay files back into the repo.
+    assert!(
+        overlay.join("foo.txt").is_file(),
+        "`foo.txt` was not added to the overlay directory"
+    );
+    assert!(
+        !repo.join("bar.txt").exists(),
+        "`bar.txt` should not be in the repository before `sync`"
+    );
+
+    // A subsequent `sync` brings the hand-placed overlay file back into the
+    // repository.
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+    assert!(
+        repo.join("bar.txt").is_file(),
+        "`bar.txt` was not added to the repository by `sync`"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("bar.txt")).expect("failed to read repo `bar.txt`"),
+        "bar",
+        "repo `bar.txt` content does not match the overlay file"
+    );
+}
+
+#[test]
+fn remove_keeps_file_in_repo_but_removes_from_overlay() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Place two files by hand in the overlay and bring them into the repo
+    // via `sync`.
+    dir.write_file(&overlay, "foo.txt", "foo");
+    dir.write_file(&overlay, "bar.txt", "bar");
+
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+    assert!(
+        repo.join("foo.txt").is_file(),
+        "`foo.txt` was not brought into the repository"
+    );
+    assert!(
+        repo.join("bar.txt").is_file(),
+        "`bar.txt` was not brought into the repository"
+    );
+
+    // Removing the `foo.txt` pattern stops managing it: the file stays in
+    // the repository, but its copy is dropped from the overlay.
+    let remove = run_remove(&repo, &["foo.txt"]);
+    assert!(
+        remove.status.success(),
+        "`git-overlay remove foo.txt` failed: {}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+
+    assert!(
+        repo.join("foo.txt").is_file(),
+        "`foo.txt` should still exist in the repository after `remove`"
+    );
+    assert!(
+        !overlay.join("foo.txt").exists(),
+        "`foo.txt` should be removed from the overlay after `remove`"
+    );
+
+    // The other file is untouched.
+    assert!(
+        overlay.join("bar.txt").is_file(),
+        "`bar.txt` should still exist in the overlay"
+    );
+}
+
+#[test]
+fn remove_one_of_overlapping_patterns_keeps_file_managed() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // A file in the repository made private by two overlapping patterns:
+    // an explicit name and a glob that also matches it.
+    dir.write_file(&repo, "foo.txt", "foo");
+
+    let add = run_add(&repo, &["foo.txt", "*.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add foo.txt *.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    assert!(
+        overlay.join("foo.txt").is_file(),
+        "`foo.txt` was not added to the overlay directory"
+    );
+
+    // Removing only the explicit `foo.txt` pattern must not unmanage the
+    // file, because `*.txt` still covers it.
+    let remove = run_remove(&repo, &["foo.txt"]);
+    assert!(
+        remove.status.success(),
+        "`git-overlay remove foo.txt` failed: {}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+
+    assert!(
+        repo.join("foo.txt").is_file(),
+        "`foo.txt` should remain in the repository"
+    );
+    assert!(
+        overlay.join("foo.txt").is_file(),
+        "`foo.txt` should remain in the overlay"
     );
 }

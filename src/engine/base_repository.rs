@@ -105,7 +105,11 @@ impl BaseRepository {
                     })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        self.sync_added(&candidates)
+        self.sync_added(&candidates)?;
+        // Persist the newly managed files so a later `sync` recognizes the
+        // moved files as already managed (instead of trying to move them
+        // again).
+        self.config.save()
     }
 
     /// Removes all patterns from the repository's private ignore file
@@ -293,6 +297,9 @@ impl BaseRepository {
                 format!("failed to link {} to {}: {e}", file.display(), dest.display())
             })?;
             info!("linked {} to {}", file.display(), dest.display());
+            // A file pulled from the overlay is managed; record it so a later
+            // `remove`/`sync` knows to drop it from the overlay again.
+            self.config.add_managed_file(rel.to_string_lossy().into_owned());
         }
 
         Ok(())
