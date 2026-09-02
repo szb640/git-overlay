@@ -68,8 +68,17 @@ impl TestDir {
 
     /// Writes `relative` inside the temp root with `content`, creating any
     /// missing parent directories. Returns the absolute path of the file.
+    #[allow(dead_code)] // used only by the E2E target
     pub fn write(&self, relative: &str, content: &str) -> PathBuf {
         self.write_file(&self.path, relative, content)
+    }
+
+    /// Writes `n` files named `name_prefix`...`n` into `dir`. Used to build
+    /// large fixtures for scaling tests. Returns the directory's path.
+    pub fn write_many(&self, dir: &Path, name_prefix: &str, n: usize) {
+        for i in 0..n {
+            self.write_file(dir, &format!("{name_prefix}{i}"), "content");
+        }
     }
 
     /// Creates an empty Git repository named `name` using the real `git` CLI
