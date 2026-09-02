@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
 use ignore::gitignore::GitignoreBuilder;
-use log::info;
+use log::{info, warn};
 
 use crate::engine::exclude::ExcludeFile;
 use crate::engine::{OverlayDirectory, RepositoryConfiguration};
@@ -286,6 +286,17 @@ impl BaseRepository {
             })?;
             let dest = repo_root.join(rel);
             if dest.exists() {
+                // The file is already present in the repository. Overwriting
+                // it with the overlay copy (or vice versa) could destroy data,
+                // so leave both in place. If the two copies disagree, flag a
+                // conflict so the user can resolve it by hand.
+                if contents_differ(&dest, &file)? {
+                    warn!(
+                        "{} exists in both the repository and the overlay with different \
+                         contents; leaving both in place and ignoring it",
+                        rel.display()
+                    );
+                }
                 continue;
             }
             if let Some(parent) = dest.parent() {
@@ -405,6 +416,14 @@ fn matching_files<'a>(
 fn canonicalize(path: &PathBuf) -> Result<PathBuf, String> {
     std::fs::canonicalize(path)
         .map_err(|e| format!("failed to resolve path {}: {e}", path.display()))
+}
+
+/// Returns `Ok(true)` if two files have identical contents. Files that are
+/// hard links to the same inode trivially compare equal.
+fn contents_differ(a: &Path, b: &Path) -> Result<bool, String> {
+    let a = std::fs::read(a).map_err(|e| format!("failed to read {}: {e}", a.display()))?;
+    let b = std::fs::read(b).map_err(|e| format!("failed to read {}: {e}", b.display()))?;
+    Ok(a != b)
 }
 
 /// Runs `git rev-parse` with the given arguments in `dir`, returning the

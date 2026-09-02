@@ -370,3 +370,75 @@ fn remove_one_of_overlapping_patterns_keeps_file_managed() {
         "`foo.txt` should remain in the overlay"
     );
 }
+
+#[test]
+fn sync_with_file_in_both_repo_and_overlay_keeps_both() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // A file that exists (independently) both in the repository and in the
+    // overlay, but is not registered as a managed pattern.
+    dir.write_file(&repo, "foo.txt", "repo-foo");
+    dir.write_file(&overlay, "foo.txt", "overlay-foo");
+
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    // Because the two copies disagree, `sync` must not clobber or remove
+    // either one: both survive with their contents intact, and a warning is
+    // emitted so the user notices the conflict.
+    let stderr = String::from_utf8_lossy(&sync.stderr);
+    assert!(
+        stderr.contains("both the repository and the overlay")
+            && stderr.contains("leaving both in place"),
+        "`sync` did not warn about the out-of-sync `foo.txt`; got: {stderr}"
+    );
+
+    assert!(
+        repo.join("foo.txt").is_file(),
+        "`foo.txt` should remain in the repository"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
+        "repo-foo",
+        "repository copy of `foo.txt` was modified by `sync`"
+    );
+    assert!(
+        overlay.join("foo.txt").is_file(),
+        "`foo.txt` should remain in the overlay"
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
+        "overlay-foo",
+        "overlay copy of `foo.txt` was modified by `sync`"
+    );
+
+    // `sync` pins the pre-existing overlay file into the ignore rules, so it
+    // no longer shows up as untracked.
+    let status = Command::new("git")
+        .arg("check-ignore")
+        .arg("--quiet")
+        .arg("foo.txt")
+        .current_dir(&repo)
+        .status()
+        .expect("failed to run `git check-ignore`");
+    assert!(
+        status.success(),
+        "`foo.txt` should be ignored by git after `sync`"
+    );
+}
