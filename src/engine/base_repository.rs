@@ -186,7 +186,12 @@ impl BaseRepository {
         self.overlay = OverlayDirectory::new(
             &self.repo_root_abs.join(self.config.overlay_directory()),
         )?;
-        self.exclude.save()
+        self.exclude.save()?;
+
+        // Bring any overlay files into the repository (as hard links) and
+        // make them private to this clone by folding them into the exclude
+        // file, so they do not show up as untracked in `git status`.
+        self.sync()
     }
 
     /// Moves each candidate file that is excluded but not yet managed into the

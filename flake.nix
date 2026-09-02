@@ -14,6 +14,9 @@
 
       src = ./.;
 
+      # E2E tests (`tests/`) invoke the real `git` CLI to create test repos.
+      nativeBuildInputs = [ pkgs.git ];
+
       cargoHash = "sha256-L3cgFz5fWTDyWjxA3Tr9XWIQ5h0BieCX4Pw4FOjubEw=";
 
       meta = {

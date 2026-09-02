@@ -66,7 +66,7 @@ impl RepositoryConfiguration {
 
     /// Writes the configuration to disk as YAML, creating the parent
     /// directory if necessary.
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&mut self) -> Result<(), String> {
         let path = Self::path(&self.root());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -76,7 +76,10 @@ impl RepositoryConfiguration {
         let content =
             serde_yaml::to_string(self).map_err(|e| format!("failed to serialize config: {e}"))?;
         std::fs::write(&path, content)
-            .map_err(|e| format!("failed to write {}: {e}", path.display()))
+            .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+        // A successful write means the config now exists on disk.
+        self.exists = true;
+        Ok(())
     }
 
     /// The repository root this configuration belongs to.
