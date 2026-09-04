@@ -28,9 +28,38 @@ impl OverlayDirectory {
         &self.root
     }
 
-    /// Returns the ignore patterns configured for the directory.
+    /// Returns the managed patterns configured for the directory.
     pub fn list_patterns(&self) -> &[String] {
+        self.config.managed_patterns()
+    }
+
+    /// Returns the ignore patterns configured for the directory.
+    pub fn list_ignore_patterns(&self) -> &[String] {
         self.config.ignore_patterns()
+    }
+
+    /// Appends each pattern to the directory's ignore patterns and writes the
+    /// config to disk in a single save.
+    pub fn add_ignore_patterns(
+        &mut self,
+        patterns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<(), String> {
+        for pattern in patterns {
+            self.config.add_ignore_pattern(pattern);
+        }
+        self.config.save()
+    }
+
+    /// Removes each pattern from the directory's ignore patterns and writes
+    /// the config to disk in a single save.
+    pub fn remove_ignore_patterns(
+        &mut self,
+        patterns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<(), String> {
+        for pattern in patterns {
+            self.config.remove_ignore_pattern(pattern);
+        }
+        self.config.save()
     }
 
     /// Returns the absolute paths of all files in the overlay directory,
@@ -56,33 +85,33 @@ impl OverlayDirectory {
         Ok(files)
     }
 
-    /// Appends each pattern to the directory's ignore patterns and writes the
+    /// Appends each pattern to the directory's managed patterns and writes the
     /// config to disk in a single save.
     pub fn add_patterns(
         &mut self,
         patterns: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<(), String> {
         for pattern in patterns {
-            self.config.add_ignore_pattern(pattern);
+            self.config.add_managed_pattern(pattern);
         }
         self.config.save()
     }
 
-    /// Removes each pattern from the directory's ignore patterns and writes
+    /// Removes each pattern from the directory's managed patterns and writes
     /// the config to disk in a single save.
     pub fn remove_patterns(
         &mut self,
         patterns: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<(), String> {
         for pattern in patterns {
-            self.config.remove_ignore_pattern(pattern);
+            self.config.remove_managed_pattern(pattern);
         }
         self.config.save()
     }
 
     /// Finds every file in the overlay directory that is not matched by any
-    /// of the configured ignore patterns and adds it as an explicit relative
-    /// path to the ignore patterns, then writes the config to disk in a
+    /// of the configured managed patterns and adds it as an explicit relative
+    /// path to the managed patterns, then writes the config to disk in a
     /// single save.
     ///
     /// This "pins" stray files that were added by hand (or by a pattern that
@@ -90,14 +119,14 @@ impl OverlayDirectory {
     /// than silently remaining outside the ignore rules.
     pub fn fix_patterns(&mut self) -> Result<(), String> {
         let mut builder = ignore::gitignore::GitignoreBuilder::new(&self.root);
-        for pattern in self.config.ignore_patterns() {
+        for pattern in self.config.managed_patterns() {
             builder
                 .add_line(None, pattern)
-                .map_err(|e| format!("invalid ignore pattern {pattern:?}: {e}"))?;
+                .map_err(|e| format!("invalid managed pattern {pattern:?}: {e}"))?;
         }
         let matcher = builder
             .build()
-            .map_err(|e| format!("failed to build overlay ignore matcher: {e}"))?;
+            .map_err(|e| format!("failed to build overlay managed matcher: {e}"))?;
 
         for file in self.files()? {
             if matcher.matched(&file, false).is_ignore() {
@@ -114,7 +143,7 @@ impl OverlayDirectory {
                 })?
                 .to_string_lossy()
                 .into_owned();
-            self.config.add_ignore_pattern(rel);
+            self.config.add_managed_pattern(rel);
         }
 
         self.config.save()

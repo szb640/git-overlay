@@ -10,7 +10,7 @@ const CONFIG_PATH: &str = ".git-overlay.yml";
 ///
 /// This is a structured file the tool itself owns and writes. It tracks
 /// settings that apply to a single overlay directory, currently a list of
-/// ignore patterns.
+/// managed patterns and a list of ignore patterns.
 #[derive(Serialize, Deserialize)]
 pub struct DirectoryConfig {
     /// Directory root this configuration was loaded for. Not serialized.
@@ -21,16 +21,20 @@ pub struct DirectoryConfig {
     /// written yet.
     #[serde(skip)]
     exists: bool,
-    /// Ignore patterns applied to files in the overlay directory.
+    /// Patterns of files managed in the overlay directory.
+    managed_patterns: Vec<String>,
+    /// Patterns of files to ignore when scanning the overlay directory.
     ignore_patterns: Vec<String>,
 }
 
 impl DirectoryConfig {
-    /// A default configuration rooted at `root`, with no ignore patterns.
+    /// A default configuration rooted at `root`, with no managed or ignore
+    /// patterns.
     fn default_with(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
             exists: false,
+            managed_patterns: Vec::new(),
             ignore_patterns: Vec::new(),
         }
     }
@@ -84,6 +88,26 @@ impl DirectoryConfig {
     /// loaded. A default config that has never been saved reports `false`.
     pub fn exists(&self) -> bool {
         self.exists
+    }
+
+    /// The managed patterns for the overlay directory.
+    pub fn managed_patterns(&self) -> &[String] {
+        &self.managed_patterns
+    }
+
+    /// Appends a managed pattern to the directory config, if not already
+    /// present.
+    pub fn add_managed_pattern(&mut self, pattern: impl Into<String>) {
+        let pattern = pattern.into();
+        if !self.managed_patterns.iter().any(|p| p == &pattern) {
+            self.managed_patterns.push(pattern);
+        }
+    }
+
+    /// Removes all occurrences of `pattern` from the managed patterns.
+    pub fn remove_managed_pattern(&mut self, pattern: impl Into<String>) {
+        let pattern = pattern.into();
+        self.managed_patterns.retain(|p| p != &pattern);
     }
 
     /// The ignore patterns for the overlay directory.

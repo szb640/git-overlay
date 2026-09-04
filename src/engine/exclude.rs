@@ -127,6 +127,39 @@ impl ExcludeFile {
     pub fn patterns(&self) -> &[String] {
         &self.patterns
     }
+
+    /// Returns whether `pattern` appears anywhere in the file (in the managed
+    /// block or outside it).
+    fn contains_anywhere(&self, pattern: &str) -> bool {
+        self.patterns.iter().any(|p| p == pattern)
+            || self.head.lines().any(|l| l.trim() == pattern)
+            || self.tail.lines().any(|l| l.trim() == pattern)
+    }
+
+    /// Appends `pattern` to the file outside the managed block (after the
+    /// closing guard), preserving it there so it is not managed by
+    /// git-overlay. Does nothing on disk until [`Self::save`]; a no-op if
+    /// `pattern` is already present anywhere in the file.
+    pub fn add_ignored(&mut self, pattern: impl Into<String>) {
+        let pattern = pattern.into();
+        if self.contains_anywhere(&pattern) {
+            return;
+        }
+        if !self.tail.is_empty() && !self.tail.ends_with('\n') {
+            self.tail.push('\n');
+        }
+        self.tail.push_str(&pattern);
+        self.tail.push('\n');
+    }
+
+    /// Removes every occurrence of `pattern` from outside the managed block
+    /// (i.e. the surrounding head/tail content) so it is no longer present in
+    /// the file. The managed-block patterns are left untouched. Does nothing
+    /// on disk until [`Self::save`].
+    pub fn remove_ignored(&mut self, pattern: &str) {
+        self.head = filter_line(&self.head, pattern);
+        self.tail = filter_line(&self.tail, pattern);
+    }
 }
 
 /// Strips a leading comment marker and surrounding whitespace from a pattern
@@ -149,4 +182,18 @@ fn join_lines(lines: &[&str]) -> String {
         s.push('\n');
     }
     s
+}
+
+/// Returns `content` with every line equal to `target` (ignoring surrounding
+/// whitespace) dropped, preserving the newlines and ordering of the rest.
+fn filter_line(content: &str, target: &str) -> String {
+    let mut out = String::new();
+    for line in content.split_terminator('\n') {
+        if line.trim() == target {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }

@@ -79,7 +79,7 @@ impl BaseRepository {
     }
 
     /// Appends each pattern to the repository's private ignore file
-    /// (`.git/info/exclude`) and to the overlay directory's ignore patterns,
+    /// (`.git/info/exclude`) and to the overlay directory's managed patterns,
     /// writing both to disk in a single save each.
     pub fn add_patterns(
         &mut self,
@@ -172,6 +172,38 @@ impl BaseRepository {
             .collect::<Result<Vec<_>, String>>()?;
         let managed: Vec<String> = self.config.managed_files().to_vec();
         self.sync_removed(&managed, &excluded)
+    }
+
+    /// Adds each pattern to the repository's private ignore file outside the
+    /// managed block (`.git/info/exclude`) and to the overlay directory's
+    /// ignore patterns, writing both to disk in a single save each.
+    pub fn add_ignores(
+        &mut self,
+        patterns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<(), String> {
+        self.ensure_initialized()?;
+        let patterns: Vec<String> = patterns.into_iter().map(Into::into).collect();
+        for pattern in &patterns {
+            self.exclude.add_ignored(pattern);
+        }
+        self.exclude.save()?;
+        self.overlay.add_ignore_patterns(patterns)
+    }
+
+    /// Removes each pattern from the repository's private ignore file
+    /// (`.git/info/exclude`) and from the overlay directory's ignore patterns,
+    /// writing both to disk in a single save each.
+    pub fn remove_ignores(
+        &mut self,
+        patterns: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<(), String> {
+        self.ensure_initialized()?;
+        let patterns: Vec<String> = patterns.into_iter().map(Into::into).collect();
+        for pattern in &patterns {
+            self.exclude.remove_ignored(pattern);
+        }
+        self.exclude.save()?;
+        self.overlay.remove_ignore_patterns(patterns)
     }
 
     /// Returns an error if the repository has not been initialized (i.e. its
@@ -289,9 +321,20 @@ impl BaseRepository {
         Ok(())
     }
 
-    /// Folds any ignore patterns present in the overlay config (but not yet in
-    /// the exclude file) into the repository's private ignore file, keeping
-    /// both sources in sync.
+    /// Folds any ignore patterns present in the overlay config into the
+    /// repository's private ignore file (outside the managed block),
+    /// keeping both sources in sync.
+    fn sync_ignore_patterns(&mut self) -> Result<(), String> {
+        let patterns: Vec<String> = self.overlay.list_ignore_patterns().to_vec();
+        for pattern in patterns {
+            self.exclude.add_ignored(pattern);
+        }
+        self.exclude.save()
+    }
+
+    /// Folds any managed patterns present in the overlay config (but not yet
+    /// in the exclude file) into the repository's private ignore file,
+    /// keeping both sources in sync.
     fn sync_overlay_patterns(&mut self) -> Result<(), String> {
         let exclude_patterns: Vec<String> = self.exclude.patterns().to_vec();
         for pattern in self.overlay.list_patterns() {
@@ -378,9 +421,13 @@ impl BaseRepository {
 
         self.overlay.fix_patterns()?;
 
-        // Fold any ignore patterns present in the overlay config (but not yet
-        // in the exclude file) into the exclude file.
+        // Fold any managed patterns present in the overlay config (but not
+        // yet in the exclude file) into the exclude file.
         self.sync_overlay_patterns()?;
+
+        // Make sure every ignored pattern in the overlay config is present
+        // in the exclude file (outside the managed block).
+        self.sync_ignore_patterns()?;
 
         // Bring any overlay files that are missing from the repository back in
         // via hard links.

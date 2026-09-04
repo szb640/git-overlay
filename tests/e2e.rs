@@ -58,6 +58,30 @@ fn run_info(repo: &Path) -> std::process::Output {
         .expect("failed to spawn `git-overlay info`")
 }
 
+/// Runs `git-overlay ignore add <patterns...>` in `repo` and returns the
+/// command output, panicking if the process could not be spawned.
+fn run_ignore_add(repo: &Path, patterns: &[&str]) -> std::process::Output {
+    Command::new(binary())
+        .arg("ignore")
+        .arg("add")
+        .args(patterns)
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay ignore add`")
+}
+
+/// Runs `git-overlay ignore remove <patterns...>` in `repo` and returns the
+/// command output, panicking if the process could not be spawned.
+fn run_ignore_remove(repo: &Path, patterns: &[&str]) -> std::process::Output {
+    Command::new(binary())
+        .arg("ignore")
+        .arg("remove")
+        .args(patterns)
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay ignore remove`")
+}
+
 #[test]
 fn init_records_overlay_path_in_new_repo() {
     let dir = TestDir::new();
@@ -133,7 +157,7 @@ fn init_brings_overlay_file_into_repo_and_ignores_it() {
 }
 
 #[test]
-fn info_lists_ignore_patterns_and_tracked_files() {
+fn info_lists_exclude_patterns_and_tracked_files() {
     let dir = TestDir::new();
 
     // An empty Git-managed repository and an empty overlay directory.
@@ -166,7 +190,7 @@ fn info_lists_ignore_patterns_and_tracked_files() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("hello.txt"), "info did not list the pattern/file");
-    assert!(stdout.contains("ignore patterns"), "info should report ignore patterns");
+    assert!(stdout.contains("exclude patterns"), "info should report exclude patterns");
     assert!(stdout.contains("tracked files"), "info should report tracked files");
 }
 
@@ -194,8 +218,8 @@ fn info_on_uninitialized_repo_only_reports_not_initialized() {
         "info should not report tracked files for an uninitialized repository"
     );
     assert!(
-        !stdout.contains("ignore patterns"),
-        "info should not report ignore patterns for an uninitialized repository"
+        !stdout.contains("exclude patterns"),
+        "info should not report exclude patterns for an uninitialized repository"
     );
 }
 
@@ -546,5 +570,71 @@ fn add_pattern_does_not_clobber_conflicting_overlay_file() {
         std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
         "overlay-foo",
         "overlay copy of `foo.txt` was clobbered by `add`"
+    );
+}
+
+#[test]
+fn ignore_add_puts_pattern_outside_managed_block_and_removes_it() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let exclude_path = repo.join(".git/info/exclude");
+    let config_path = overlay.join(".git-overlay.yml");
+
+    // Add an ignore pattern and confirm it lands both in the private exclude
+    // file OUTSIDE the managed guard block and in the directory config.
+    let add = run_ignore_add(&repo, &["foo.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay ignore add foo.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let exclude = std::fs::read_to_string(&exclude_path).expect("failed to read exclude file");
+    let close_guard_idx = exclude
+        .find("# <<< managed by git-overlay")
+        .expect("exclude file should contain the closing guard");
+    assert!(
+        exclude[close_guard_idx..].contains("foo.txt"),
+        "ignore pattern should be written outside the managed block, got:\n{exclude}"
+    );
+
+    let config =
+        std::fs::read_to_string(&config_path).expect("failed to read overlay config");
+    assert!(
+        config.contains("ignore_patterns") && config.contains("foo.txt"),
+        "directory config should record the ignore pattern, got:\n{config}"
+    );
+
+    // Remove the ignore pattern and confirm it is gone from both places.
+    let remove = run_ignore_remove(&repo, &["foo.txt"]);
+    assert!(
+        remove.status.success(),
+        "`git-overlay ignore remove foo.txt` failed: {}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+
+    let exclude = std::fs::read_to_string(&exclude_path).expect("failed to read exclude file");
+    assert!(
+        !exclude.contains("foo.txt"),
+        "ignore pattern should be gone from the exclude file, got:\n{exclude}"
+    );
+
+    let config =
+        std::fs::read_to_string(&config_path).expect("failed to read overlay config");
+    assert!(
+        !config.contains("foo.txt"),
+        "ignore pattern should be gone from the directory config, got:\n{config}"
     );
 }

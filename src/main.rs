@@ -5,6 +5,7 @@ use log::error;
 
 mod add;
 mod engine;
+mod ignore;
 mod info;
 mod init;
 mod remove;
@@ -48,8 +49,34 @@ enum Action {
         patterns: Vec<String>,
     },
 
-    /// Show the active ignore patterns and the tracked (managed) files
+    /// Show the active exclude patterns and the tracked (managed) files
     Info {},
+
+    /// Manage patterns to ignore in the overlay directory.
+    ///
+    /// These are written outside the managed block of the private ignore file
+    /// and recorded in the directory config.
+    Ignore {
+        #[command(subcommand)]
+        command: IgnoreCommand,
+    },
+}
+
+#[derive(Parser)]
+enum IgnoreCommand {
+    /// Add patterns to the ignore list (exclude file + directory config)
+    Add {
+        /// Pattern(s) to add to the ignore list
+        #[arg(required = true)]
+        patterns: Vec<String>,
+    },
+
+    /// Remove patterns from the ignore list (exclude file + directory config)
+    Remove {
+        /// Pattern(s) to remove from the ignore list
+        #[arg(required = true)]
+        patterns: Vec<String>,
+    },
 }
 
 fn main() {
@@ -89,6 +116,20 @@ fn main() {
             Err(e) => {
                 error!("{e}");
                 std::process::exit(1);
+            }
+        },
+        Action::Ignore { command } => match command {
+            IgnoreCommand::Add { patterns } => {
+                if let Err(e) = ignore::run_ignore_add(&patterns) {
+                    error!("{e}");
+                    std::process::exit(1);
+                }
+            }
+            IgnoreCommand::Remove { patterns } => {
+                if let Err(e) = ignore::run_ignore_remove(&patterns) {
+                    error!("{e}");
+                    std::process::exit(1);
+                }
             }
         },
     }

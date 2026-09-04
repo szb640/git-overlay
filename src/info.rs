@@ -4,7 +4,7 @@ use crate::engine::BaseRepository;
 
 /// Runs the `info` subcommand: instantiates a [`BaseRepository`] for the
 /// current directory and prints the repository's root, its active private
-/// ignore patterns (from `.git/info/exclude`), and the files currently
+/// exclude patterns (from `.git/info/exclude`), and the files currently
 /// managed by the overlay tool.
 ///
 /// If the repository has not been initialized, only a message stating that
@@ -27,7 +27,7 @@ pub fn run_info() -> Result<String, String> {
         .map_err(|e| format!("failed to build output: {e}"))?;
 
     let patterns = target.list_patterns();
-    writeln!(out, "ignore patterns ({}):", patterns.len())
+    writeln!(out, "exclude patterns ({}):", patterns.len())
         .map_err(|e| format!("failed to build output: {e}"))?;
     for pattern in patterns {
         writeln!(out, "  {pattern}")
