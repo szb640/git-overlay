@@ -17,7 +17,7 @@
       # E2E tests (`tests/`) invoke the real `git` CLI to create test repos.
       nativeBuildInputs = [ pkgs.git ];
 
-      cargoHash = "sha256-L3cgFz5fWTDyWjxA3Tr9XWIQ5h0BieCX4Pw4FOjubEw=";
+      cargoHash = "sha256-lqY4bEvy2Ny4QI39fikd/mzjHi/kXXiyEyBumugpXoM=";
 
       meta = {
         description = "Software for overlaying personal files onto a git repository";
@@ -25,11 +25,11 @@
         maintainers = [{ name = "szb640"; }];
       };
     };
-    
+
     overlays.default = final: prev: {
-      flake-helper = self.packages.${final.system}.flake-helper;
+      git-overlay = self.packages.${final.system}.git-overlay;
     };
-    
+
     devShells.${system}.default = pkgs.mkShell {
       packages = with pkgs;[
         rustc

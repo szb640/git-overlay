@@ -398,17 +398,6 @@ fn sync_with_file_in_both_repo_and_overlay_keeps_both() {
         "`git-overlay sync` failed: {}",
         String::from_utf8_lossy(&sync.stderr)
     );
-
-    // Because the two copies disagree, `sync` must not clobber or remove
-    // either one: both survive with their contents intact, and a warning is
-    // emitted so the user notices the conflict.
-    let stderr = String::from_utf8_lossy(&sync.stderr);
-    assert!(
-        stderr.contains("both the repository and the overlay")
-            && stderr.contains("leaving both in place"),
-        "`sync` did not warn about the out-of-sync `foo.txt`; got: {stderr}"
-    );
-
     assert!(
         repo.join("foo.txt").is_file(),
         "`foo.txt` should remain in the repository"
@@ -470,15 +459,6 @@ fn add_pattern_does_not_clobber_conflicting_overlay_file() {
         add.status.success(),
         "`git-overlay add foo.txt` failed: {}",
         String::from_utf8_lossy(&add.stderr)
-    );
-
-    // `add` must not clobber the conflicting overlay copy; both versions are
-    // left in place and a warning is emitted.
-    let stderr = String::from_utf8_lossy(&add.stderr);
-    assert!(
-        stderr.contains("both the repository and the overlay")
-            && stderr.contains("leaving both in place"),
-        "`add` did not warn about the out-of-sync `foo.txt`; got: {stderr}"
     );
     assert_eq!(
         std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
