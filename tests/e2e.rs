@@ -48,6 +48,16 @@ fn run_remove(repo: &Path, patterns: &[&str]) -> std::process::Output {
         .expect("failed to spawn `git-overlay remove`")
 }
 
+/// Runs `git-overlay info` in `repo` and returns the command output,
+/// panicking if the process could not be spawned.
+fn run_info(repo: &Path) -> std::process::Output {
+    Command::new(binary())
+        .arg("info")
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay info`")
+}
+
 #[test]
 fn init_records_overlay_path_in_new_repo() {
     let dir = TestDir::new();
@@ -119,6 +129,73 @@ fn init_brings_overlay_file_into_repo_and_ignores_it() {
     assert!(
         status.success(),
         "`hello.txt` is not ignored by git"
+    );
+}
+
+#[test]
+fn info_lists_ignore_patterns_and_tracked_files() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    // Initialize first so the repo is managed.
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Add a file so there is something to report as tracked.
+    dir.write_file(&repo, "hello.txt", "world");
+    let add = run_add(&repo, &["hello.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add hello.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let output = run_info(&repo);
+    assert!(
+        output.status.success(),
+        "`git-overlay info` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("hello.txt"), "info did not list the pattern/file");
+    assert!(stdout.contains("ignore patterns"), "info should report ignore patterns");
+    assert!(stdout.contains("tracked files"), "info should report tracked files");
+}
+
+#[test]
+fn info_on_uninitialized_repo_only_reports_not_initialized() {
+    let dir = TestDir::new();
+
+    // A Git-managed repository that has never been `init`-ed.
+    let repo = dir.create_git_repo("repo");
+
+    let output = run_info(&repo);
+    assert!(
+        output.status.success(),
+        "`git-overlay info` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("not initialized"),
+        "info should report the repository is not initialized"
+    );
+    assert!(
+        !stdout.contains("tracked files"),
+        "info should not report tracked files for an uninitialized repository"
+    );
+    assert!(
+        !stdout.contains("ignore patterns"),
+        "info should not report ignore patterns for an uninitialized repository"
     );
 }
 

@@ -5,6 +5,7 @@ use log::error;
 
 mod add;
 mod engine;
+mod info;
 mod init;
 mod remove;
 mod sync;
@@ -46,6 +47,9 @@ enum Action {
         #[arg(required = true)]
         patterns: Vec<String>,
     },
+
+    /// Show the active ignore patterns and the tracked (managed) files
+    Info {},
 }
 
 fn main() {
@@ -80,5 +84,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Action::Info {} => match info::run_info() {
+            Ok(output) => print!("{output}"),
+            Err(e) => {
+                error!("{e}");
+                std::process::exit(1);
+            }
+        },
     }
 }

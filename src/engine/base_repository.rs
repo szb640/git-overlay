@@ -61,6 +61,23 @@ impl BaseRepository {
         self.exclude.patterns()
     }
 
+    /// Returns the absolute path to the repository root on disk.
+    pub fn root(&self) -> &Path {
+        &self.repo_root_abs
+    }
+
+    /// Whether the repository has been initialized (i.e. its configuration
+    /// file exists on disk).
+    pub fn is_initialized(&self) -> bool {
+        self.config.exists()
+    }
+
+    /// Returns the files currently tracked (managed) by the overlay, relative
+    /// to the repository root.
+    pub fn tracked_files(&self) -> &[String] {
+        self.config.managed_files()
+    }
+
     /// Appends each pattern to the repository's private ignore file
     /// (`.git/info/exclude`) and to the overlay directory's ignore patterns,
     /// writing both to disk in a single save each.
