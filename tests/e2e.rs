@@ -58,6 +58,17 @@ fn run_info(repo: &Path) -> std::process::Output {
         .expect("failed to spawn `git-overlay info`")
 }
 
+/// Runs `git-overlay info --json` in `repo` and returns the command output,
+/// panicking if the process could not be spawned.
+fn run_info_json(repo: &Path) -> std::process::Output {
+    Command::new(binary())
+        .arg("info")
+        .arg("--json")
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay info --json`")
+}
+
 /// Runs `git-overlay ignore add <patterns...>` in `repo` and returns the
 /// command output, panicking if the process could not be spawned.
 fn run_ignore_add(repo: &Path, patterns: &[&str]) -> std::process::Output {
@@ -220,6 +231,73 @@ fn info_on_uninitialized_repo_only_reports_not_initialized() {
     assert!(
         !stdout.contains("exclude patterns"),
         "info should not report exclude patterns for an uninitialized repository"
+    );
+}
+
+#[test]
+fn info_json_prints_valid_json() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    // Initialize first so the repo is managed.
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Add a file so there is something to report as tracked.
+    dir.write_file(&repo, "hello.txt", "world");
+    let add = run_add(&repo, &["hello.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add hello.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let output = run_info_json(&repo);
+    assert!(
+        output.status.success(),
+        "`git-overlay info --json` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The output must parse as a single JSON object.
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("info --json did not print valid JSON: {e}"));
+    let obj = value.as_object().unwrap();
+    assert!(obj.contains_key("path"), "json info should report the path");
+    assert!(obj.contains_key("initialized"), "json info should report initialization state");
+    assert!(obj.contains_key("exclude_patterns"), "json info should report exclude patterns");
+    assert!(obj.contains_key("tracked_files"), "json info should report tracked files");
+    assert!(obj.contains_key("ignore_patterns"), "json info should report ignore patterns");
+}
+
+#[test]
+fn info_json_on_uninitialized_repo_prints_initialized_false() {
+    let dir = TestDir::new();
+
+    // A Git-managed repository that has never been `init`-ed.
+    let repo = dir.create_git_repo("repo");
+
+    let output = run_info_json(&repo);
+    assert!(
+        output.status.success(),
+        "`git-overlay info --json` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("info --json did not print valid JSON: {e}"));
+    assert!(
+        value["initialized"] == serde_json::Value::Bool(false),
+        "json info should report an uninitialized repository as `initialized: false`"
     );
 }
 

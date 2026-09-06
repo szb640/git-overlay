@@ -50,7 +50,11 @@ enum Action {
     },
 
     /// Show the active exclude patterns and the tracked (managed) files
-    Info {},
+    Info {
+        /// Emit the result as a JSON object.
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Manage patterns to ignore in the overlay directory.
     ///
@@ -111,7 +115,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Action::Info {} => match info::run_info() {
+        Action::Info { json } => match info::run_info(json) {
             Ok(output) => print!("{output}"),
             Err(e) => {
                 error!("{e}");
