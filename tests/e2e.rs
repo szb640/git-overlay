@@ -206,6 +206,60 @@ fn info_lists_exclude_patterns_and_tracked_files() {
 }
 
 #[test]
+fn info_lists_files_managed_by_sync() {
+    let dir = TestDir::new();
+
+    // A Git-managed repository and an overlay directory, both containing a
+    // `hello.txt` file with identical content.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+    dir.write_file(&repo, "hello.txt", "world");
+    dir.write_file(&overlay, "hello.txt", "world");
+
+    // Initializing creates the overlay link in the repository,and `sync`
+    // folds the overlay files into the ignore rules as managed patterns.
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    // `info` should now report `hello.txt` as a managed (tracked) file.
+    let output = run_info_json(&repo);
+    assert!(
+        output.status.success(),
+        "`git-overlay info --json` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|e| {
+        panic!("info --json did not print valid JSON: {e}")
+    });
+
+    // The managed files are read from the `tracked_files` JSON key.
+    let tracked = value["tracked_files"]
+        .as_array()
+        .unwrap_or_else(|| panic!("info should report tracked files"));
+
+    let files: Vec<&str> = tracked
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        files.contains(&"hello.txt"),
+        "info should list `hello.txt` as tracked after `sync`"
+    );
+}
+
+#[test]
 fn info_on_uninitialized_repo_only_reports_not_initialized() {
     let dir = TestDir::new();
 

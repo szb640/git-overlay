@@ -346,13 +346,17 @@ impl BaseRepository {
                 // The file is already present in the repository. Overwriting
                 // it with the overlay copy (or vice versa) could destroy data,
                 // so leave both in place. If the two copies disagree, flag a
-                // conflict so the user can resolve it by hand.
+                // conflict so the user can resolve it by hand; the file is then not
+                // treated as managed. If the copies match, treat it as managed so
+                // a later `info`/`remove`/`sync` knows to track it.
                 if contents_differ(&dest, &file)? {
                     warn!(
                         "{} exists in both the repository and the overlay with different \
                          contents; leaving both in place and ignoring it",
                         rel.display()
                     );
+                } else {
+                    self.config.add_managed_file(rel.to_string_lossy().into_owned());
                 }
                 continue;
             }

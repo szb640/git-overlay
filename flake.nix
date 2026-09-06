@@ -17,7 +17,7 @@
       # E2E tests (`tests/`) invoke the real `git` CLI to create test repos.
       nativeBuildInputs = [ pkgs.git ];
 
-      cargoHash = "sha256-lqY4bEvy2Ny4QI39fikd/mzjHi/kXXiyEyBumugpXoM=";
+      cargoHash = "sha256-LelUlxzSF5As23aPmAhFudRkr03s1IWHZ5eOVExFM18=";
 
       meta = {
         description = "Software for overlaying personal files onto a git repository";
