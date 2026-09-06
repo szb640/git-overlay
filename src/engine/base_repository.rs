@@ -61,6 +61,12 @@ impl BaseRepository {
         self.exclude.patterns()
     }
 
+    /// Returns the ignore patterns configured for the overlay directory
+    /// (outside the managed block).
+    pub fn list_ignore_patterns(&self) -> &[String] {
+        self.overlay.list_ignore_patterns()
+    }
+
     /// Returns the absolute path to the repository root on disk.
     pub fn root(&self) -> &Path {
         &self.repo_root_abs

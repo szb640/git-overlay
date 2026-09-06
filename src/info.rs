@@ -41,5 +41,13 @@ pub fn run_info() -> Result<String, String> {
         writeln!(out, "  {file}").map_err(|e| format!("failed to build output: {e}"))?;
     }
 
+    let ignored = target.list_ignore_patterns();
+    writeln!(out, "ignore patterns ({}):", ignored.len())
+        .map_err(|e| format!("failed to build output: {e}"))?;
+    for pattern in ignored {
+        writeln!(out, "  {pattern}")
+            .map_err(|e| format!("failed to build output: {e}"))?;
+    }
+
     Ok(out)
 }
