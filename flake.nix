@@ -27,7 +27,7 @@
     };
 
     overlays.default = final: prev: {
-      git-overlay = self.packages.${final.system}.git-overlay;
+      git-overlay = self.packages.${final.stdenv.hostPlatform.system}.git-overlay;
     };
 
     devShells.${system}.default = pkgs.mkShell {
