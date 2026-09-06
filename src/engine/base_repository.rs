@@ -302,20 +302,22 @@ impl BaseRepository {
         managed: &[String],
         excluded: &[PathBuf],
     ) -> Result<(), String> {
-        let overlay_dir = self.overlay.root();
-
         for rel in managed {
             let rel_path = Path::new(rel);
             if excluded.iter().any(|e| e == rel_path) {
                 continue;
             }
 
-            let dest = overlay_dir.join(&rel_path);
+            let dest = self.overlay.root().join(&rel_path);
             std::fs::remove_file(&dest).map_err(|e| {
                 format!("failed to remove {}: {e}", dest.display())
             })?;
             info!("removed {} from overlay", dest.display());
             self.config.remove_managed_file(rel.clone());
+            // The overlay config's managed patterns record the path too; drop
+            // it so the config does not keep a stale reference to a file that
+            // is no longer in the overlay.
+            self.overlay.remove_patterns(&[rel.clone()])?;
         }
 
         Ok(())

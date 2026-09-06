@@ -362,6 +362,64 @@ fn add_does_not_sync_overlay_files_but_sync_does() {
 }
 
 #[test]
+fn sync_after_deleting_repo_file_removes_it_from_overlay() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an overlay directory already
+    // holding a single private file.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+    dir.write_file(&overlay, "hello.txt", "world");
+
+    // Initialize the repo with the overlay and sync so the file is pulled
+    // into the repository (and registered as managed).
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+    assert!(
+        repo.join("hello.txt").is_file(),
+        "`hello.txt` was not synced into the repository"
+    );
+
+    // Delete the synced file from the repository, then sync again.
+    std::fs::remove_file(repo.join("hello.txt"))
+        .expect("failed to remove repo `hello.txt`");
+
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    // Because the managed file is no longer in the repository, the sync
+    // removes its copy from the overlay directory as well.
+    assert!(
+        !overlay.join("hello.txt").exists(),
+        "`hello.txt` should be removed from the overlay after `sync`"
+    );
+
+    // The overlay's own config should no longer reference the file.
+    let overlay_config =
+        std::fs::read_to_string(overlay.join(".git-overlay.yml"))
+            .expect("failed to read overlay config");
+    assert!(
+        !overlay_config.contains("hello.txt"),
+        "overlay config should no longer reference `hello.txt`, got:\n{overlay_config}"
+    );
+}
+
+#[test]
 fn remove_keeps_file_in_repo_but_removes_from_overlay() {
     let dir = TestDir::new();
 
