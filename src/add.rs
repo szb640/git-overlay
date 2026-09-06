@@ -11,7 +11,7 @@ pub fn run_add(patterns: &[String]) -> Result<(), String> {
 
     let mut target = BaseRepository::new(&dir)?;
 
-    target.add_patterns(patterns.iter())?;
+    target.add_patterns(patterns)?;
     for pattern in patterns {
         info!("added exclude_pattern={pattern}");
     }

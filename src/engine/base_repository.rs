@@ -81,22 +81,20 @@ impl BaseRepository {
     /// Appends each pattern to the repository's private ignore file
     /// (`.git/info/exclude`) and to the overlay directory's managed patterns,
     /// writing both to disk in a single save each.
-    pub fn add_patterns(
-        &mut self,
-        patterns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), String> {
+    pub fn add_patterns(&mut self, patterns: &[String]) -> Result<(), String> {
         self.ensure_initialized()?;
 
         // Drop patterns already present in the exclude file, and any
         // duplicates within the batch itself.
         let existing: Vec<String> = self.exclude.patterns().to_vec();
-        let mut seen = std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<&str> =
+            existing.iter().map(String::as_str).collect();
         let mut unique: Vec<String> = Vec::new();
-        for pattern in patterns.into_iter().map(Into::into) {
-            if existing.contains(&pattern) || !seen.insert(pattern.clone()) {
+        for pattern in patterns {
+            if !seen.insert(pattern.as_str()) {
                 continue;
             }
-            unique.push(pattern);
+            unique.push(pattern.clone());
         }
 
         for pattern in &unique {
@@ -140,20 +138,14 @@ impl BaseRepository {
     /// Removes each pattern from the repository's private ignore file
     /// (`.git/info/exclude`) and from the overlay directory's ignore
     /// patterns, writing both to disk in a single save each.
-    pub fn remove_patterns(
-        &mut self,
-        patterns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), String> {
+    pub fn remove_patterns(&mut self, patterns: &[String]) -> Result<(), String> {
         self.ensure_initialized()?;
-        let patterns: Vec<String> = patterns.into_iter().map(Into::into).collect();
-        for pattern in &patterns {
+        for pattern in patterns {
             self.exclude.remove(pattern);
         }
         self.exclude.save()?;
-        self.overlay.remove_patterns(&patterns)?;
+        self.overlay.remove_patterns(patterns)?;
 
-        // Remove from the overlay any managed files that the removed patterns
-        // no longer exclude.
         let repo_root = &self.repo_root_abs;
         let excluded: Vec<PathBuf> = self
             .excluded_files()?
@@ -177,13 +169,9 @@ impl BaseRepository {
     /// Adds each pattern to the repository's private ignore file outside the
     /// managed block (`.git/info/exclude`) and to the overlay directory's
     /// ignore patterns, writing both to disk in a single save each.
-    pub fn add_ignores(
-        &mut self,
-        patterns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), String> {
+    pub fn add_ignores(&mut self, patterns: &[String]) -> Result<(), String> {
         self.ensure_initialized()?;
-        let patterns: Vec<String> = patterns.into_iter().map(Into::into).collect();
-        for pattern in &patterns {
+        for pattern in patterns {
             self.exclude.add_ignored(pattern);
         }
         self.exclude.save()?;
@@ -193,13 +181,9 @@ impl BaseRepository {
     /// Removes each pattern from the repository's private ignore file
     /// (`.git/info/exclude`) and from the overlay directory's ignore patterns,
     /// writing both to disk in a single save each.
-    pub fn remove_ignores(
-        &mut self,
-        patterns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), String> {
+    pub fn remove_ignores(&mut self, patterns: &[String]) -> Result<(), String> {
         self.ensure_initialized()?;
-        let patterns: Vec<String> = patterns.into_iter().map(Into::into).collect();
-        for pattern in &patterns {
+        for pattern in patterns {
             self.exclude.remove_ignored(pattern);
         }
         self.exclude.save()?;

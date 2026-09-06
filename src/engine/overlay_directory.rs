@@ -40,24 +40,18 @@ impl OverlayDirectory {
 
     /// Appends each pattern to the directory's ignore patterns and writes the
     /// config to disk in a single save.
-    pub fn add_ignore_patterns(
-        &mut self,
-        patterns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), String> {
+    pub fn add_ignore_patterns(&mut self, patterns: &[String]) -> Result<(), String> {
         for pattern in patterns {
-            self.config.add_ignore_pattern(pattern);
+            self.config.add_ignore_pattern(pattern.clone());
         }
         self.config.save()
     }
 
     /// Removes each pattern from the directory's ignore patterns and writes
     /// the config to disk in a single save.
-    pub fn remove_ignore_patterns(
-        &mut self,
-        patterns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), String> {
+    pub fn remove_ignore_patterns(&mut self, patterns: &[String]) -> Result<(), String> {
         for pattern in patterns {
-            self.config.remove_ignore_pattern(pattern);
+            self.config.remove_ignore_pattern(pattern.clone());
         }
         self.config.save()
     }
@@ -99,12 +93,9 @@ impl OverlayDirectory {
 
     /// Removes each pattern from the directory's managed patterns and writes
     /// the config to disk in a single save.
-    pub fn remove_patterns(
-        &mut self,
-        patterns: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<(), String> {
+    pub fn remove_patterns(&mut self, patterns: &[String]) -> Result<(), String> {
         for pattern in patterns {
-            self.config.remove_managed_pattern(pattern);
+            self.config.remove_managed_pattern(pattern.clone());
         }
         self.config.save()
     }

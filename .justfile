@@ -13,3 +13,6 @@ build:
 alias t := test
 test:
     cargo test
+
+perf:
+    cargo test --release --test scale sync_scales -- --ignored --nocapture --test-threads=1

@@ -12,7 +12,7 @@ pub fn run_ignore_add(patterns: &[String]) -> Result<(), String> {
 
     let mut target = BaseRepository::new(&dir)?;
 
-    target.add_ignores(patterns.iter())?;
+    target.add_ignores(patterns)?;
     for pattern in patterns {
         info!("added ignore={pattern}");
     }
@@ -30,7 +30,7 @@ pub fn run_ignore_remove(patterns: &[String]) -> Result<(), String> {
 
     let mut target = BaseRepository::new(&dir)?;
 
-    target.remove_ignores(patterns.iter())?;
+    target.remove_ignores(patterns)?;
     for pattern in patterns {
         info!("removed ignore={pattern}");
     }

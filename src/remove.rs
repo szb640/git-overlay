@@ -11,7 +11,7 @@ pub fn run_remove(patterns: &[String]) -> Result<(), String> {
 
     let mut target = BaseRepository::new(&dir)?;
 
-    target.remove_patterns(patterns.iter())?;
+    target.remove_patterns(patterns)?;
     for pattern in patterns {
         info!("removed exclude_pattern={pattern}");
     }
