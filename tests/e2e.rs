@@ -209,12 +209,14 @@ fn info_lists_exclude_patterns_and_tracked_files() {
 fn info_lists_files_managed_by_sync() {
     let dir = TestDir::new();
 
-    // A Git-managed repository and an overlay directory, both containing a
-    // `hello.txt` file with identical content.
+    // A Git-managed repository and an overlay directory, both containing
+    // `hello.txt` and `.hello.txt` files with identical content.
     let repo = dir.create_git_repo("repo");
     let overlay = dir.create_dir("overlay");
     dir.write_file(&repo, "hello.txt", "world");
     dir.write_file(&overlay, "hello.txt", "world");
+    dir.write_file(&repo, ".hello.txt", "world");
+    dir.write_file(&overlay, ".hello.txt", "world");
 
     // Initializing creates the overlay link in the repository,and `sync`
     // folds the overlay files into the ignore rules as managed patterns.
@@ -256,6 +258,10 @@ fn info_lists_files_managed_by_sync() {
     assert!(
         files.contains(&"hello.txt"),
         "info should list `hello.txt` as tracked after `sync`"
+    );
+    assert!(
+        files.contains(&".hello.txt"),
+        "info should list `.hello.txt` as tracked after `sync`"
     );
 }
 

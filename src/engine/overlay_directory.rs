@@ -62,7 +62,9 @@ impl OverlayDirectory {
         let config_path = self.root.join(DirectoryConfig::path(&self.root));
         let mut files = Vec::new();
 
-        let walker = ignore::WalkBuilder::new(&self.root).build();
+        let walker = ignore::WalkBuilder::new(&self.root)
+            .hidden(false)
+            .build();
         for entry in walker {
             let entry = entry
                 .map_err(|e| format!("failed to walk overlay directory: {e}"))?;
