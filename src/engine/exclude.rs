@@ -15,8 +15,6 @@ const CLOSE_GUARD: &str = "# <<< managed by git-overlay";
 /// A list of patterns lives between two guard clauses in the file. Only that
 /// region is managed; the rest of the file is left as the user wrote it.
 pub struct ExcludeFile {
-    /// The repository root this manager belongs to.
-    root: PathBuf,
     /// Location of `.git/info/exclude` under `root`.
     path: PathBuf,
     /// The patterns between the guard clauses, loaded by [`Self::load`].
@@ -36,7 +34,6 @@ impl ExcludeFile {
         let root = root.to_path_buf();
         let path = root.join(".git").join("info").join("exclude");
         let mut file = Self {
-            root,
             path,
             patterns: Vec::new(),
             head: String::new(),
@@ -109,12 +106,6 @@ impl ExcludeFile {
     /// not touch the file until [`Self::save`] is called.
     pub fn remove(&mut self, pattern: &str) {
         self.patterns.retain(|p| p != pattern);
-    }
-
-    /// Clears the in-memory list of patterns. Does not touch the file until
-    /// [`Self::save`] is called.
-    pub fn clear(&mut self) {
-        self.patterns.clear();
     }
 
     /// Writes the current in-memory patterns to the managed region (as plain,

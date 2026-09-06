@@ -84,12 +84,6 @@ impl DirectoryConfig {
         &self.root
     }
 
-    /// Whether the configuration file existed on disk when this instance was
-    /// loaded. A default config that has never been saved reports `false`.
-    pub fn exists(&self) -> bool {
-        self.exists
-    }
-
     /// The managed patterns for the overlay directory.
     pub fn managed_patterns(&self) -> &[String] {
         &self.managed_patterns

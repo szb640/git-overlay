@@ -127,14 +127,6 @@ impl BaseRepository {
         self.config.save()
     }
 
-    /// Removes all patterns from the repository's private ignore file
-    /// (`.git/info/exclude`) and writes it to disk.
-    pub fn clear_patterns(&mut self) -> Result<(), String> {
-        self.ensure_initialized()?;
-        self.exclude.clear();
-        self.exclude.save()
-    }
-
     /// Removes each pattern from the repository's private ignore file
     /// (`.git/info/exclude`) and from the overlay directory's ignore
     /// patterns, writing both to disk in a single save each.
