@@ -619,6 +619,68 @@ fn remove_keeps_file_in_repo_but_removes_from_overlay() {
 }
 
 #[test]
+fn remove_after_manually_deleting_overlay_file_succeeds() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Add a file to the repo, move it into the overlay via `add`, and
+    // bring it fully under management via `sync`.
+    dir.write_file(&repo, "hello.txt", "world");
+    let add = run_add(&repo, &["hello.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay add hello.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+    assert!(
+        overlay.join("hello.txt").is_file(),
+        "`hello.txt` should be in the overlay after `sync`"
+    );
+
+    // Remove the file from the overlay by hand, leaving it only in the
+    // repository (as if a user or another tool removed it).
+    std::fs::remove_file(overlay.join("hello.txt"))
+        .expect("failed to manually remove overlay `hello.txt`");
+
+    // `remove` should still succeed: it drops the pattern from the ignore
+    // list and the stale managed record, without tripping over the already
+    // -removed overlay file.
+    let remove = run_remove(&repo, &["hello.txt"]);
+    assert!(
+        remove.status.success(),
+        "`git-overlay remove hello.txt` failed: {}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+
+    // The repository copy stays; nothing is left in the overlay.
+    assert!(
+        repo.join("hello.txt").is_file(),
+        "`hello.txt` should still exist in the repository after `remove`"
+    );
+    assert!(
+        !overlay.join("hello.txt").exists(),
+        "`hello.txt` should not appear in the overlay after `remove`"
+    );
+}
+
+#[test]
 fn remove_one_of_overlapping_patterns_keeps_file_managed() {
     let dir = TestDir::new();
 

@@ -291,9 +291,16 @@ impl BaseRepository {
             }
 
             let dest = self.overlay.root().join(&rel_path);
-            std::fs::remove_file(&dest).map_err(|e| {
-                format!("failed to remove {}: {e}", dest.display())
-            })?;
+            match std::fs::remove_file(&dest) {
+                Ok(()) => {}
+                // The file may already have been removed from the overlay by
+                // hand (or another tool); that is fine an just a stale managed
+                // record to clean up.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(format!("failed to remove {}: {e}", dest.display()));
+                }
+            }
             info!("removed {} from overlay", dest.display());
             self.config.remove_managed_file(rel.clone());
             // The overlay config's managed patterns record the path too; drop
