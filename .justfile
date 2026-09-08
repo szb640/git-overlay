@@ -10,6 +10,10 @@ alias b := build
 build:
     nix build .#git-overlay
 
+alias w := windows
+windows:
+    nix build .#git-overlay-windows
+
 alias t := test
 test:
     cargo test
