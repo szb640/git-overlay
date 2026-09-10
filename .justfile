@@ -20,3 +20,11 @@ test:
 
 perf:
     cargo test --release --test scale sync_scales -- --ignored --nocapture --test-threads=1
+
+pack:
+    just build
+    mkdir -p out/
+    zip -FSj out/git-overlay-linux.zip result/bin/git-overlay
+    just windows
+    zip -FSj out/git-overlay-windows.zip result/bin/git-overlay.exe
+    

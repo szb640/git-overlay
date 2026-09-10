@@ -47,6 +47,7 @@
         cargo
         rustfmt
         clippy
+        zip
       ];
     };
   };
