@@ -8,15 +8,12 @@
     pkgs = nixpkgs.legacyPackages.${system};
     cargoConfig = builtins.fromTOML (builtins.readFile ./Cargo.toml);
 
-    # Builds the package with the given rustPlatform (i.e. cross-compilation
-    # target), reusing the same Cargo.lock/vendored-dependency hash.
-    mkPackage = rustPlatform: pkgsFor: rustPlatform.buildRustPackage {
+    mkPackage = pkgsFor: pkgsFor.rustPlatform.buildRustPackage {
       pname = cargoConfig.package.name;
       version = cargoConfig.package.version;
 
       src = ./.;
 
-      # E2E tests (`tests/`) invoke the real `git` CLI to create test repos.
       nativeBuildInputs = [ pkgsFor.git ];
 
       cargoHash = "sha256-zHrbESsao05xeCCH+UUTr7QjPoq+9M8bnEoUF1bBSh0=";
@@ -27,14 +24,15 @@
         maintainers = [{ name = "szb640"; }];
       };
     };
+
+    mkDebianPackage = import ./mkDebianPackage.nix;
   in {
     packages.${system} = {
-      git-overlay = mkPackage pkgs.rustPlatform pkgs;
+      git-overlay = mkPackage pkgs;
 
-      # Windows (mingw-w64) cross-compiled binary.
-      git-overlay-windows = mkPackage
-        pkgs.pkgsCross.mingwW64.rustPlatform
-        pkgs.pkgsCross.mingwW64;
+      git-overlay-windows-x64 = mkPackage pkgs.pkgsCross.mingwW64;
+
+      git-overlay-debian-x64 = mkDebianPackage pkgs self.packages.${system}.git-overlay;
     };
 
     overlays.default = final: prev: {
