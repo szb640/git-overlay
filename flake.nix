@@ -34,7 +34,7 @@
 
           nativeBuildInputs = [ pkgs.git ];
 
-          cargoHash = "sha256-zHrbESsao05xeCCH+UUTr7QjPoq+9M8bnEoUF1bBSh0=";
+          cargoHash = "sha256-paWnSKF0rJjMYSlMWRC2svtHRcgQaDIrg37GXQA9Ee4=";
 
           meta = {
             description = "Software for overlaying personal files onto a git repository";

@@ -46,6 +46,6 @@ in pkgsFor.stdenv.mkDerivation {
     dpkg-deb --build \
       --root-owner-group \
       "$packageRoot" \
-      "$out/${installPackage.pname}_${installPackage.version}_${debianArch}.deb"
+      "$out/${installPackage.pname}-${installPackage.version}-${system}.deb"
   '';
 }

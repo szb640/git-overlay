@@ -1,33 +1,41 @@
 ARCHITECTURES := $(shell nix flake show --json 2>/dev/null | jq -r '.packages | keys[]')
+VERSION := $(shell cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
 
-all: out/git-overlay-x86_64-windows.zip \
-	out/git-overlay-x86_64-linux.zip \
-	out/git-overlay-armv7l-linux.zip \
-	out/git-overlay-aarch64-linux.zip \
-	out/aarch64-linux-deb \
-	out/armv7l-linux-deb \
-	out/x86_64-linux-deb
+all: \
+	out/git-overlay-$(VERSION)-x86_64-windows.zip \
+	out/git-overlay-$(VERSION)-x86_64-linux.zip \
+	out/git-overlay-$(VERSION)-armv7l-linux.zip \
+	out/git-overlay-$(VERSION)-aarch64-linux.zip \
+	out/git-overlay-$(VERSION)-aarch64-linux.deb \
+	out/git-overlay-$(VERSION)-armv7l-linux.deb \
+	out/git-overlay-$(VERSION)-x86_64-linux.deb
 
 RUST_SOURCES := $(shell find src -type f -name '*.rs')
 CARGO_FILES := Cargo.toml Cargo.lock
 FLAKE_FILES := flake.lock
 
 define NIX_PROJECT_template
-NIX_PROJECT_ZIP_$(1) := $(abspath out/git-overlay-$(1).zip)
 
 .PHONY: $(1)
 
-$(1): out/$(1) out/git-overlay-$(1).zip out/$(1)-deb
+# Compile binary with flake
+build/$(1): $(RUST_SOURCES) $(CARGO_FILES) $(FLAKE_FILES)
+	nix build .#packages.$(1).git-overlay --out-link "build/$(1)"
 
-out/$(1): $(RUST_SOURCES) $(CARGO_FILES) $(FLAKE_FILES)
-	nix build .#packages.$(1).git-overlay --out-link "out/$(1)"
+# Compile debian package with flake
+build/$(1)-deb/git-overlay-$(VERSION)-$(1).deb: $(RUST_SOURCES) $(CARGO_FILES) $(FLAKE_FILES) build/$(1)
+	nix build .#packages.$(1).git-overlay-debian --out-link "build/$(1)-deb"
 
-out/$(1)-deb: $(RUST_SOURCES) $(CARGO_FILES) $(FLAKE_FILES) out/$(1)
-	nix build .#packages.$(1).git-overlay-debian --out-link "out/$(1)-deb"
+# Package debian package
+out/git-overlay-$(VERSION)-$(1).deb: build/$(1)-deb/git-overlay-$(VERSION)-$(1).deb
+	mkdir -p out
+	cp -f "$$<" "$$@"
 
-out/git-overlay-$(1).zip: out/$(1)
-	rm -f "$$(NIX_PROJECT_ZIP_$(1))"
-	cd "out/$(1)" && zip -r "$$(NIX_PROJECT_ZIP_$(1))" .
+# Package binaries
+out/git-overlay-$(VERSION)-$(1).zip: build/$(1)
+	rm -f "$$(abspath $$@)"
+	mkdir -p out
+	cd "build/$(1)" && zip -r "$$(abspath $$@)" .
 
 endef
 
