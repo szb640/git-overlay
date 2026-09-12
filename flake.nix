@@ -1,52 +1,65 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/0e251e24a4f24e036a084b6b4b2d2491af4167f4";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs }: let
-    system = "x86_64-linux";
-    pkgs = nixpkgs.legacyPackages.${system};
-    cargoConfig = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+  outputs = { self, nixpkgs, flake-utils }: let
+    currentSystem = "x86_64-linux";
+    targetSystems = [
+      "x86_64-linux"
+      "x86_64-windows"
+      "armv7l-linux"
+      "aarch64-linux"
+    ];
+  in flake-utils.lib.eachSystem targetSystems (system:
+    let
+      pkgs = if system == "x86_64-windows" && currentSystem == "x86_64-linux" then
+        nixpkgs.legacyPackages.${currentSystem}.pkgsCross.mingwW64
+      else
+        import nixpkgs {
+          localSystem = currentSystem;
+          crossSystem = system;
+        };
+      cargoConfig = builtins.fromTOML (builtins.readFile ./Cargo.toml);
 
-    mkPackage = pkgsFor: pkgsFor.rustPlatform.buildRustPackage {
-      pname = cargoConfig.package.name;
-      version = cargoConfig.package.version;
+      mkDebianPackage = import ./mkDebianPackage.nix;
+    in {
+      packages = {
+        git-overlay = pkgs.rustPlatform.buildRustPackage {
+          pname = cargoConfig.package.name;
+          version = cargoConfig.package.version;
+          
+          src = ./.;
 
-      src = ./.;
+          nativeBuildInputs = [ pkgs.git ];
 
-      nativeBuildInputs = [ pkgsFor.git ];
+          cargoHash = "sha256-zHrbESsao05xeCCH+UUTr7QjPoq+9M8bnEoUF1bBSh0=";
 
-      cargoHash = "sha256-zHrbESsao05xeCCH+UUTr7QjPoq+9M8bnEoUF1bBSh0=";
-
-      meta = {
-        description = "Software for overlaying personal files onto a git repository";
-        mainProgram = "git-overlay";
-        maintainers = [{ name = "szb640"; }];
+          meta = {
+            description = "Software for overlaying personal files onto a git repository";
+            mainProgram = "git-overlay";
+            maintainers = [{ name = "szb640"; email = "szb640@gmail.com"; }];
+          };
+        };
+        
+        git-overlay-debian = mkDebianPackage pkgs self.packages.${system}.git-overlay;
       };
-    };
 
-    mkDebianPackage = import ./mkDebianPackage.nix;
-  in {
-    packages.${system} = {
-      git-overlay = mkPackage pkgs;
+      overlays.default = final: prev: {
+        git-overlay = self.packages.${final.stdenv.hostPlatform.system}.git-overlay;
+      };
 
-      git-overlay-windows-x64 = mkPackage pkgs.pkgsCross.mingwW64;
-
-      git-overlay-debian-x64 = mkDebianPackage pkgs self.packages.${system}.git-overlay;
-    };
-
-    overlays.default = final: prev: {
-      git-overlay = self.packages.${final.stdenv.hostPlatform.system}.git-overlay;
-    };
-
-    devShells.${system}.default = pkgs.mkShell {
-      packages = with pkgs;[
-        rustc
-        cargo
-        rustfmt
-        clippy
-        zip
-      ];
-    };
-  };
+      devShells.default = pkgs.mkShell {
+        packages = with pkgs;[
+          rustc
+          cargo
+          rustfmt
+          clippy
+          zip
+          jq
+        ];
+      };
+    }
+  );
 }

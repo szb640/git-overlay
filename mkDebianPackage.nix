@@ -1,5 +1,6 @@
 pkgsFor: installPackage:  let
   system = pkgsFor.stdenv.hostPlatform.system;
+  maintainer = builtins.elemAt installPackage.meta.maintainers 0;
   debianArchMap = {
     "x86_64-linux" = "amd64";
     "aarch64-linux" = "arm64";
@@ -12,8 +13,8 @@ pkgsFor: installPackage:  let
   };
   debianArch = debianArchMap.${system};
 in pkgsFor.stdenv.mkDerivation {
-  pname = "git-overlay-debian";
-  version = installPackage.version or "0.1.0";
+  pname = "${installPackage.name}-debian";
+  version = installPackage.version;
   
   dontUnpack = true;
   dontConfigure = true;
@@ -29,23 +30,22 @@ in pkgsFor.stdenv.mkDerivation {
     mkdir -p "$packageRoot/DEBIAN"
     mkdir -p "$packageRoot/usr/bin"
 
-    cp ${installPackage}/bin/git-overlay "$packageRoot/usr/bin/git-overlay"
-    chmod 0755 "$packageRoot/usr/bin/git-overlay"
+    cp -r ${installPackage}/ "$packageRoot/usr/"
 
     cat > "$packageRoot/DEBIAN/control" <<EOF
-    Package: git-overlay
+    Package: ${installPackage.pname}
     Version: ${installPackage.version}
     Section: utils
     Priority: optional
     Architecture: ${debianArch}
-    Maintainer: Bence Szikszai <szb640@gmail.com>
-    Description: Git Overlay
-      Software for overlaying personal files onto a git repository
+    Maintainer: ${maintainer.name} <${maintainer.email}>
+    Description: ${installPackage.meta.mainProgram}
+      ${installPackage.meta.description}
     EOF
 
     dpkg-deb --build \
       --root-owner-group \
       "$packageRoot" \
-      "$out/git-overlay_${installPackage.version}_${debianArch}.deb"
+      "$out/${installPackage.pname}_${installPackage.version}_${debianArch}.deb"
   '';
 }
