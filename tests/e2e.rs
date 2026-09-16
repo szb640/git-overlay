@@ -93,6 +93,30 @@ fn run_ignore_remove(repo: &Path, patterns: &[&str]) -> std::process::Output {
         .expect("failed to spawn `git-overlay ignore remove`")
 }
 
+/// Runs `git-overlay file add <paths...>` in `repo` and returns the command
+/// output, panicking if the process could not be spawned.
+fn run_file_add(repo: &Path, paths: &[&str]) -> std::process::Output {
+    Command::new(binary())
+        .arg("file")
+        .arg("add")
+        .args(paths)
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay file add`")
+}
+
+/// Runs `git-overlay file remove <paths...>` in `repo` and returns the
+/// command output, panicking if the process could not be spawned.
+fn run_file_remove(repo: &Path, paths: &[&str]) -> std::process::Output {
+    Command::new(binary())
+        .arg("file")
+        .arg("remove")
+        .args(paths)
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay file remove`")
+}
+
 #[test]
 fn init_records_overlay_path_in_new_repo() {
     let dir = TestDir::new();
@@ -894,5 +918,150 @@ fn ignore_add_puts_pattern_outside_managed_block_and_removes_it() {
     assert!(
         !config.contains("foo.txt"),
         "ignore pattern should be gone from the directory config, got:\n{config}"
+    );
+}
+
+#[test]
+fn file_add_manages_only_the_specific_path() {
+    let dir = TestDir::new();
+
+    // A Git-managed repository with the same file name in two directories,
+    // and an empty overlay directory.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+    dir.write_file(&repo, "top.txt", "top");
+    dir.write_file(&repo, "sub/top.txt", "sub");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Add only the nested file, by its repository-relative path.
+    let add = run_file_add(&repo, &["sub/top.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay file add sub/top.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    // The pattern recorded must be anchored at the repository root, so it
+    // targets exactly that file and no other file of the same name.
+    let exclude =
+        std::fs::read_to_string(repo.join(".git/info/exclude")).expect("failed to read exclude");
+    assert!(
+        exclude.contains("/sub/top.txt"),
+        "expected a root-anchored `/sub/top.txt` pattern, got:\n{exclude}"
+    );
+
+    // Only the specific file moved into the overlay; the root `top.txt` was
+    // left alone even though it shares the same name.
+    assert!(
+        overlay.join("sub/top.txt").is_file(),
+        "`sub/top.txt` should be managed in the overlay"
+    );
+    assert!(
+        !overlay.join("top.txt").exists(),
+        "root `top.txt` should not be managed by `/sub/top.txt`"
+    );
+
+    // Nor is the root file ignored by git.
+    let status = Command::new("git")
+        .arg("check-ignore")
+        .arg("--quiet")
+        .arg("top.txt")
+        .current_dir(&repo)
+        .status()
+        .expect("failed to run `git check-ignore`");
+    assert!(
+        !status.success(),
+        "root `top.txt` should not be ignored by `/sub/top.txt`"
+    );
+}
+
+#[test]
+fn file_add_normalizes_relative_path() {
+    let dir = TestDir::new();
+
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // Adding a file by a path that goes up through `..` should still be
+    // recorded against its clean repository-relative path.
+    dir.write_file(&repo, "sub/top.txt", "sub");
+    let add = run_file_add(&repo, &["sub/./../sub/top.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay file add sub/./../sub/top.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+
+    let exclude =
+        std::fs::read_to_string(repo.join(".git/info/exclude")).expect("failed to read exclude");
+    assert!(
+        exclude.contains("/sub/top.txt"),
+        "expected a normalized `/sub/top.txt` pattern, got:\n{exclude}"
+    );
+    assert!(
+        !exclude.contains(".."),
+        "no `..` should remain in the pattern, got:\n{exclude}"
+    );
+}
+
+#[test]
+fn file_remove_unmanages_the_specific_path() {
+    let dir = TestDir::new();
+
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    dir.write_file(&repo, "sub/top.txt", "sub");
+    let add = run_file_add(&repo, &["sub/top.txt"]);
+    assert!(
+        add.status.success(),
+        "`git-overlay file add sub/top.txt` failed: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    assert!(
+        overlay.join("sub/top.txt").is_file(),
+        "`sub/top.txt` should be managed after `file add`"
+    );
+
+    let remove = run_file_remove(&repo, &["sub/top.txt"]);
+    assert!(
+        remove.status.success(),
+        "`git-overlay file remove sub/top.txt` failed: {}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+
+    // The file stays in the repository but is dropped from the overlay, and
+    // its anchored pattern is gone from the exclude file.
+    assert!(
+        repo.join("sub/top.txt").is_file(),
+        "`sub/top.txt` should stay in the repository after `file remove`"
+    );
+    assert!(
+        !overlay.join("sub/top.txt").exists(),
+        "`sub/top.txt` should be removed from the overlay after `file remove`"
+    );
+    let exclude =
+        std::fs::read_to_string(repo.join(".git/info/exclude")).expect("failed to read exclude");
+    assert!(
+        !exclude.contains("/sub/top.txt"),
+        "`/sub/top.txt` should be removed from the exclude file, got:\n{exclude}"
     );
 }

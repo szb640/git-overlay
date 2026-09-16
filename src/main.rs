@@ -5,6 +5,7 @@ use log::error;
 
 mod add;
 mod engine;
+mod file;
 mod ignore;
 mod info;
 mod init;
@@ -63,6 +64,35 @@ enum Action {
     Ignore {
         #[command(subcommand)]
         command: IgnoreCommand,
+    },
+
+    /// Add or remove an individual file, targeting only that exact path.
+    ///
+    /// The pattern added matches the file precisely via its relative path in
+    /// the repository, so two files with the same name in different
+    /// directories are not both affected.
+    File {
+        #[command(subcommand)]
+        command: FileCommand,
+    },
+}
+
+#[derive(Parser)]
+enum FileCommand {
+    /// Add an individual file, matched only by its exact relative path in the
+    /// repository.
+    Add {
+        /// Path(s) to the file(s) to add
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
+
+    /// Remove an individual file, matched only by its exact relative path in
+    /// the repository.
+    Remove {
+        /// Path(s) to the file(s) to remove
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
     },
 }
 
@@ -131,6 +161,20 @@ fn main() {
             }
             IgnoreCommand::Remove { patterns } => {
                 if let Err(e) = ignore::run_ignore_remove(&patterns) {
+                    error!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        },
+        Action::File { command } => match command {
+            FileCommand::Add { paths } => {
+                if let Err(e) = file::run_file_add(&paths) {
+                    error!("{e}");
+                    std::process::exit(1);
+                }
+            }
+            FileCommand::Remove { paths } => {
+                if let Err(e) = file::run_file_remove(&paths) {
                     error!("{e}");
                     std::process::exit(1);
                 }

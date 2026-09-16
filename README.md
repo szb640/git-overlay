@@ -82,9 +82,20 @@ cd ~/public-project
 touch hello-world.txt
 git-overlay add hello-world.txt
 
+# Add a single file, matched only by its exact repository path
+git-overlay file add hello-world.txt
+
 # Add a pattern; every matching file (now and in the future) is managed
 git-overlay add '*.txt'
 ```
+
+The difference between `add` and `file add` is intent: `add` stores the
+pattern literally, so adding `hello.txt` matches *any* file of that name
+anywhere in the repository. `file add` anchors the pattern at the repository
+root (storing, e.g., `/config/settings.toml`), so it targets only that one
+file at that exact path—a same-named file in another directory is left
+alone. Use it when you want to manage a specific file now without also
+claiming future files that happen to share its name.
 
 A file is managed as long as it matches at least one active pattern. This
 makes it safe to migrate from explicit files to pattern-based matching:
@@ -118,6 +129,8 @@ Run `git-overlay --help` for the complete list of commands and options.
 | `sync` | Synchronize the repository and the overlay directory. |
 | `add <pattern>...` | Add patterns to the private ignore list and manage matching files. |
 | `remove <pattern>...` | Remove patterns from the private ignore list. |
+| `file add <path>...` | Add individual files via their exact repository-relative path (root-anchored pattern). |
+| `file remove <path>...` | Remove individual files via their exact repository-relative path. |
 | `info [--json]` | Show the active exclude patterns and the tracked (managed) files. |
 | `ignore add <pattern>...` | Add patterns to the overlay ignore list. |
 | `ignore remove <pattern>...` | Remove patterns from the overlay ignore list. |
