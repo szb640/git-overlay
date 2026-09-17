@@ -7,6 +7,23 @@ use log::{info, warn};
 use crate::engine::exclude::ExcludeFile;
 use crate::engine::{OverlayDirectory, RepositoryConfiguration};
 
+/// Which side to keep when `sync` finds a file present in both the repository
+/// and the overlay with different contents.
+///
+/// `Repository` keeps the repository's copy; `Overlay` keeps the overlay's
+/// copy. The accepted CLI values are `this`/`repository` and `that`/`overlay`
+/// respectively. When no force is requested, `sync` leaves both in place and
+/// warns instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum ForceSide {
+    /// Keep the repository's copy (`--force this` / `--force repository`).
+    #[value(alias = "this")]
+    Repository,
+    /// Keep the overlay's copy (`--force that` / `--force overlay`).
+    #[value(alias = "that")]
+    Overlay,
+}
+
 /// A repository to be overlaid into the overlay repository.
 pub struct BaseRepository {
     /// Absolute path to the repository root on disk.
@@ -29,7 +46,12 @@ impl BaseRepository {
         let info = git_rev_parse(&dir, &["--is-inside-work-tree", "--show-toplevel"])?;
         let (inside, toplevel) = match info.as_slice() {
             [inside, top] => (inside.as_str(), top.as_str()),
-            _ => return Err(format!("unexpected git rev-parse output in {}", dir.display())),
+            _ => {
+                return Err(format!(
+                    "unexpected git rev-parse output in {}",
+                    dir.display()
+                ));
+            }
         };
 
         if inside != "true" {
@@ -126,7 +148,7 @@ impl BaseRepository {
                     })
             })
             .collect::<Result<Vec<_>, String>>()?;
-        self.sync_added(&candidates)?;
+        self.sync_added(&candidates, None)?;
         // Persist the newly managed files so a later `sync` recognizes the
         // moved files as already managed (instead of trying to move them
         // again).
@@ -149,15 +171,15 @@ impl BaseRepository {
             .excluded_files()?
             .iter()
             .map(|file| {
-                file.strip_prefix(repo_root).map(Path::to_path_buf).map_err(
-                    |e| {
+                file.strip_prefix(repo_root)
+                    .map(Path::to_path_buf)
+                    .map_err(|e| {
                         format!(
                             "failed to relativize {} to {}: {e}",
                             file.display(),
                             repo_root.display()
                         )
-                    },
-                )
+                    })
             })
             .collect::<Result<Vec<_>, String>>()?;
         let managed: Vec<String> = self.config.managed_files().to_vec();
@@ -198,12 +220,10 @@ impl BaseRepository {
                 self.repo_root_abs.display()
             ));
         }
-        self.overlay = OverlayDirectory::new(
-            &self.repo_root_abs.join(self.config.overlay_directory()),
-        )?;
+        self.overlay =
+            OverlayDirectory::new(&self.repo_root_abs.join(self.config.overlay_directory()))?;
         Ok(())
     }
-
 
     /// Initializes the repository: fails if it is already initialized, and
     /// otherwise writes the configuration file with the overlay path set to
@@ -218,21 +238,24 @@ impl BaseRepository {
         }
         self.config.set_overlay_directory(overlay_path.into());
         self.config.save()?;
-        self.overlay = OverlayDirectory::new(
-            &self.repo_root_abs.join(self.config.overlay_directory()),
-        )?;
+        self.overlay =
+            OverlayDirectory::new(&self.repo_root_abs.join(self.config.overlay_directory()))?;
         self.exclude.save()?;
 
         // Bring any overlay files into the repository (as hard links) and
         // make them private to this clone by folding them into the exclude
         // file, so they do not show up as untracked in `git status`.
-        self.sync()
+        self.sync(None)
     }
 
     /// Moves each candidate file that is excluded but not yet managed into the
     /// overlay directory and hard links it back into the repository, then
     /// registers it in the config. Skips files already recorded as managed.
-    fn sync_added(&mut self, candidates: &[PathBuf]) -> Result<(), String> {
+    fn sync_added(
+        &mut self,
+        candidates: &[PathBuf],
+        force: Option<ForceSide>,
+    ) -> Result<(), String> {
         let repo_root = &self.repo_root_abs;
         let overlay_dir = self.overlay.root();
         let managed: Vec<String> = self.config.managed_files().to_vec();
@@ -247,31 +270,50 @@ impl BaseRepository {
             let dest = overlay_dir.join(rel);
             // If the overlay already holds its own copy at this path, moving
             // the repo file over it would destroy the overlay's contents. When
-            // the two copies disagree, leave both in place and warn instead of
-            // clobbering. When they match, make the repo file a hard link to
-            // the overlay copy so the overlay stays the source of truth.
+            // the two copies agree, make the repo file a hard link to the
+            // overlay copy so the overlay stays the source of truth. When they
+            // disagree, honor `--force` to pick a winner; otherwise leave both
+            // in place and warn instead of clobbering.
             if dest.exists() {
                 if contents_differ(&dest, &file)? {
-                    warn!(
-                        "{} exists in both the repository and the overlay with different \
-                         contents; leaving both in place and ignoring it",
-                        rel.display()
-                    );
+                    match force {
+                        Some(ForceSide::Repository) => {
+                            force_repo_into_overlay(&mut self.config, &file, &dest, &rel_str)?;
+                        }
+                        Some(ForceSide::Overlay) => {
+                            relink_repo_to_overlay(&mut self.config, &dest, &file, &rel_str)?;
+                        }
+                        None => {
+                            warn!(
+                                "{} exists in both the repository and the overlay with different \
+                                 contents; re-run `sync --force this` (keep repo) or `--force \
+                                 that` (keep overlay)",
+                                rel.display()
+                            );
+                        }
+                    }
                 } else {
                     relink_repo_to_overlay(&mut self.config, &dest, &file, &rel_str)?;
                 }
                 continue;
             }
             if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    format!("failed to create {}: {e}", parent.display())
-                })?;
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
             }
             std::fs::rename(&file, &dest).map_err(|e| {
-                format!("failed to move {} to {}: {e}", file.display(), dest.display())
+                format!(
+                    "failed to move {} to {}: {e}",
+                    file.display(),
+                    dest.display()
+                )
             })?;
             std::fs::hard_link(&dest, &file).map_err(|e| {
-                format!("failed to link {} back to {}: {e}", dest.display(), file.display())
+                format!(
+                    "failed to link {} back to {}: {e}",
+                    dest.display(),
+                    file.display()
+                )
             })?;
             info!("moved {} to {}", file.display(), dest.display());
             self.config.add_managed_file(rel_str);
@@ -283,11 +325,7 @@ impl BaseRepository {
     /// Removes from the overlay directory any file that is listed as managed
     /// in the config but no longer among the currently excluded files, and
     /// unregisters it from the config.
-    fn sync_removed(
-        &mut self,
-        managed: &[String],
-        excluded: &[PathBuf],
-    ) -> Result<(), String> {
+    fn sync_removed(&mut self, managed: &[String], excluded: &[PathBuf]) -> Result<(), String> {
         for rel in managed {
             let rel_path = Path::new(rel);
             if excluded.iter().any(|e| e == rel_path) {
@@ -344,28 +382,43 @@ impl BaseRepository {
 
     /// Hard links any overlay files that are not present in the repository
     /// back into it, at the same relative path.
-    fn sync_overlay_files(&mut self) -> Result<(), String> {
+    fn sync_overlay_files(&mut self, force: Option<ForceSide>) -> Result<(), String> {
         let overlay_dir = self.overlay.root();
         let repo_root = &self.repo_root_abs;
 
         for file in self.overlay.files()? {
             let rel = file.strip_prefix(overlay_dir).map_err(|_| {
-                format!("failed to relativize {} to {}", file.display(), overlay_dir.display())
+                format!(
+                    "failed to relativize {} to {}",
+                    file.display(),
+                    overlay_dir.display()
+                )
             })?;
             let dest = repo_root.join(rel);
             if dest.exists() {
-                // The file is already present in the repository. Overwriting
-                // it with the overlay copy (or vice versa) could destroy data,
-                // so leave both in place. If the two copies disagree, flag a
-                // conflict so the user can resolve it by hand; the file is then not
-                // treated as managed. If the copies match, treat it as managed so
-                // a later `info`/`remove`/`sync` knows to track it.
+                // The file is already present in the repository. If the two
+                // copies match, make the repository copy a hard link to the
+                // overlay file and register it as managed. If they disagree,
+                // honor `--force` to pick a winner; otherwise leave both in
+                // place and warn instead.
                 if contents_differ(&dest, &file)? {
-                    warn!(
-                        "{} exists in both the repository and the overlay with different \
-                         contents; leaving both in place and ignoring it",
-                        rel.display()
-                    );
+                    let rel_str = rel.to_string_lossy().into_owned();
+                    match force {
+                        Some(ForceSide::Repository) => {
+                            force_repo_into_overlay(&mut self.config, &dest, &file, &rel_str)?;
+                        }
+                        Some(ForceSide::Overlay) => {
+                            relink_repo_to_overlay(&mut self.config, &file, &dest, &rel_str)?;
+                        }
+                        None => {
+                            warn!(
+                                "{} exists in both the repository and the overlay with different \
+                                 contents; re-run `sync --force this` (keep repo) or `--force \
+                                 that` (keep overlay)",
+                                rel.display()
+                            );
+                        }
+                    }
                 } else {
                     // Identical contents: make the repository copy a hard link
                     // to the overlay file and register it as managed.
@@ -375,17 +428,21 @@ impl BaseRepository {
                 continue;
             }
             if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    format!("failed to create {}: {e}", parent.display())
-                })?;
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
             }
             std::fs::hard_link(&file, &dest).map_err(|e| {
-                format!("failed to link {} to {}: {e}", file.display(), dest.display())
+                format!(
+                    "failed to link {} to {}: {e}",
+                    file.display(),
+                    dest.display()
+                )
             })?;
             info!("linked {} to {}", file.display(), dest.display());
             // A file pulled from the overlay is managed; record it so a later
             // `remove`/`sync` knows to drop it from the overlay again.
-            self.config.add_managed_file(rel.to_string_lossy().into_owned());
+            self.config
+                .add_managed_file(rel.to_string_lossy().into_owned());
         }
 
         Ok(())
@@ -397,7 +454,12 @@ impl BaseRepository {
     /// and registers it in the config. For each file managed in the config but
     /// no longer excluded, removes it from the overlay directory and
     /// unregisters it from the config. Only works on initialized repositories.
-    pub fn sync(&mut self) -> Result<(), String> {
+    ///
+    /// When a file exists in both the repository and the overlay with
+    /// different contents, `force` picks which copy to keep: `Some(Repository)`
+    /// keeps the repository copy, `Some(Overlay)` keeps the overlay copy, and
+    /// `None` leaves both in place and warns.
+    pub fn sync(&mut self, force: Option<ForceSide>) -> Result<(), String> {
         self.ensure_initialized()?;
 
         let repo_root = &self.repo_root_abs;
@@ -406,7 +468,11 @@ impl BaseRepository {
         let mut excluded: Vec<PathBuf> = Vec::new();
         for file in self.excluded_files()? {
             let rel = file.strip_prefix(repo_root).map_err(|_| {
-                format!("failed to relativize {} to {}", file.display(), repo_root.display())
+                format!(
+                    "failed to relativize {} to {}",
+                    file.display(),
+                    repo_root.display()
+                )
             })?;
             excluded.push(rel.to_path_buf());
         }
@@ -416,7 +482,7 @@ impl BaseRepository {
         let managed: Vec<String> = self.config.managed_files().to_vec();
 
         // Move + hard-link files that are excluded but not yet managed.
-        self.sync_added(&excluded)?;
+        self.sync_added(&excluded, force)?;
 
         // Remove overlay files that are managed but no longer excluded.
         self.sync_removed(&managed, &excluded)?;
@@ -433,7 +499,7 @@ impl BaseRepository {
 
         // Bring any overlay files that are missing from the repository back in
         // via hard links.
-        self.sync_overlay_files()?;
+        self.sync_overlay_files(force)?;
 
         self.config.save()
     }
@@ -497,16 +563,17 @@ fn canonicalize(path: &PathBuf) -> Result<PathBuf, String> {
         .map_err(|e| format!("failed to resolve path {}: {e}", path.display()))
 }
 
-/// Returns `Ok(true)` if two files have identical contents. Files that are
-/// hard links to the same inode trivially compare equal.
+/// Replaces the repository copy at `dest` with a hard link to the overlay
+/// copy `overlay_file`, so both paths point at the overlay inode (the overlay
+/// stays the real file and the repository copy is a hard link to it).
+/// Registers the file as managed.
 fn relink_repo_to_overlay(
     config: &mut RepositoryConfiguration,
     overlay_file: &Path,
     dest: &Path,
     rel: &str,
 ) -> Result<(), String> {
-    std::fs::remove_file(dest)
-        .map_err(|e| format!("failed to remove {}: {e}", dest.display()))?;
+    std::fs::remove_file(dest).map_err(|e| format!("failed to remove {}: {e}", dest.display()))?;
     std::fs::hard_link(overlay_file, dest).map_err(|e| {
         format!(
             "failed to link {} to {}: {e}",
@@ -517,6 +584,48 @@ fn relink_repo_to_overlay(
     info!("linked {} to {}", dest.display(), overlay_file.display());
     // The file now shares an inode with the overlay source; record it so a
     // later `remove`/`sync` knows to drop it from the overlay again.
+    config.add_managed_file(rel.to_string());
+    Ok(())
+}
+
+/// Keeps the repository copy's contents when both files disagree
+/// (`--force repository`), while preserving the invariant that the overlay
+/// directory holds the real file and the repository only holds hard links
+/// pointing at it. Overwrites the overlay with the repository's content, then
+/// makes the repository copy a hard link to the overlay file.
+fn force_repo_into_overlay(
+    config: &mut RepositoryConfiguration,
+    repo_file: &Path,
+    overlay_path: &Path,
+    rel: &str,
+) -> Result<(), String> {
+    std::fs::remove_file(overlay_path)
+        .map_err(|e| format!("failed to remove {}: {e}", overlay_path.display()))?;
+    std::fs::copy(repo_file, overlay_path).map_err(|e| {
+        format!(
+            "failed to copy {} to {}: {e}",
+            repo_file.display(),
+            overlay_path.display()
+        )
+    })?;
+    // Drop the old repository inode so its path becomes a hard link to the
+    // freshly created overlay file (hard_link fails if the target exists).
+    std::fs::remove_file(repo_file)
+        .map_err(|e| format!("failed to remove {}: {e}", repo_file.display()))?;
+    std::fs::hard_link(overlay_path, repo_file).map_err(|e| {
+        format!(
+            "failed to link {} to {}: {e}",
+            overlay_path.display(),
+            repo_file.display()
+        )
+    })?;
+    info!(
+        "kept repository copy {} in overlay {} (hard-linked back)",
+        repo_file.display(),
+        overlay_path.display()
+    );
+    // The repository copy is now a hard link to the overlay file; record it so
+    // a later `remove`/`sync` knows to drop it from the overlay again.
     config.add_managed_file(rel.to_string());
     Ok(())
 }

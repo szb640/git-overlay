@@ -1,3 +1,4 @@
+use crate::engine::ForceSide;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -27,7 +28,14 @@ struct Cli {
 #[derive(Parser)]
 enum Action {
     /// Sync repositories
-    Sync {},
+    Sync {
+        /// When a file exists in both the repository and the overlay with
+        /// different contents, keep the chosen copy instead of warning:
+        /// `this`/`repository` keeps the repository copy, `that`/`overlay`
+        /// keeps the overlay copy.
+        #[arg(long, value_enum)]
+        force: Option<ForceSide>,
+    },
 
     /// Initialize the current directory as a managed repository, pointing it
     /// at the given overlay directory.
@@ -121,8 +129,8 @@ fn main() {
         .init();
 
     match cli.action {
-        Action::Sync {} => {
-            if let Err(e) = sync::run_sync() {
+        Action::Sync { force } => {
+            if let Err(e) = sync::run_sync(force) {
                 error!("{e}");
                 std::process::exit(1);
             }

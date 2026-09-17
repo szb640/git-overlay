@@ -1,9 +1,9 @@
 mod common;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use common::{binary, TestDir};
+use common::{TestDir, binary};
 
 /// Runs `git-overlay init <overlay>` in `repo` and returns the command
 /// output, panicking if the process could not be spawned.
@@ -35,6 +35,56 @@ fn run_sync(repo: &Path) -> std::process::Output {
         .current_dir(repo)
         .output()
         .expect("failed to spawn `git-overlay sync`")
+}
+
+/// Runs `git-overlay sync --force <side>` in `repo` and returns the command
+/// output, panicking if the process could not be spawned.
+fn run_sync_force(repo: &Path, side: &str) -> std::process::Output {
+    Command::new(binary())
+        .arg("sync")
+        .arg("--force")
+        .arg(side)
+        .current_dir(repo)
+        .output()
+        .expect("failed to spawn `git-overlay sync --force`")
+}
+
+/// Sets up a managed repo and overlay where `foo.txt` exists in both places
+/// with different contents, returning the `(repo, overlay)` paths.
+fn setup_conflicting_foo(dir: &TestDir) -> (PathBuf, PathBuf) {
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    dir.write_file(&repo, "foo.txt", "repo-foo");
+    dir.write_file(&overlay, "foo.txt", "overlay-foo");
+    (repo, overlay)
+}
+
+/// Asserts that `a` and `b` are hard links to the same inode.
+fn assert_same_inode(a: &Path, b: &Path, ctx: &str) {
+    use std::os::unix::fs::MetadataExt;
+    assert_eq!(
+        std::fs::metadata(a).unwrap().ino(),
+        std::fs::metadata(b).unwrap().ino(),
+        "{ctx}: files should be hard links to the same inode"
+    );
+}
+
+/// Asserts that `file` is ignored by git in `repo`.
+fn assert_ignored(repo: &Path, file: &str, ctx: &str) {
+    let status = Command::new("git")
+        .arg("check-ignore")
+        .arg("--quiet")
+        .arg(file)
+        .current_dir(repo)
+        .status()
+        .expect("failed to run `git check-ignore`");
+    assert!(status.success(), "{ctx}: `{file}` should be ignored by git");
 }
 
 /// Runs `git-overlay remove <patterns...>` in `repo` and returns the command
@@ -185,10 +235,7 @@ fn init_brings_overlay_file_into_repo_and_ignores_it() {
         .status()
         .expect("failed to run `git check-ignore`");
 
-    assert!(
-        status.success(),
-        "`hello.txt` is not ignored by git"
-    );
+    assert!(status.success(), "`hello.txt` is not ignored by git");
 }
 
 #[test]
@@ -224,9 +271,18 @@ fn info_lists_exclude_patterns_and_tracked_files() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("hello.txt"), "info did not list the pattern/file");
-    assert!(stdout.contains("exclude patterns"), "info should report exclude patterns");
-    assert!(stdout.contains("tracked files"), "info should report tracked files");
+    assert!(
+        stdout.contains("hello.txt"),
+        "info did not list the pattern/file"
+    );
+    assert!(
+        stdout.contains("exclude patterns"),
+        "info should report exclude patterns"
+    );
+    assert!(
+        stdout.contains("tracked files"),
+        "info should report tracked files"
+    );
 }
 
 #[test]
@@ -266,19 +322,15 @@ fn info_lists_files_managed_by_sync() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|e| {
-        panic!("info --json did not print valid JSON: {e}")
-    });
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("info --json did not print valid JSON: {e}"));
 
     // The managed files are read from the `tracked_files` JSON key.
     let tracked = value["tracked_files"]
         .as_array()
         .unwrap_or_else(|| panic!("info should report tracked files"));
 
-    let files: Vec<&str> = tracked
-        .iter()
-        .filter_map(|v| v.as_str())
-        .collect();
+    let files: Vec<&str> = tracked.iter().filter_map(|v| v.as_str()).collect();
     assert!(
         files.contains(&"hello.txt"),
         "info should list `hello.txt` as tracked after `sync`"
@@ -352,14 +404,26 @@ fn info_json_prints_valid_json() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     // The output must parse as a single JSON object.
-    let value: serde_json::Value =
-        serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("info --json did not print valid JSON: {e}"));
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("info --json did not print valid JSON: {e}"));
     let obj = value.as_object().unwrap();
     assert!(obj.contains_key("path"), "json info should report the path");
-    assert!(obj.contains_key("initialized"), "json info should report initialization state");
-    assert!(obj.contains_key("exclude_patterns"), "json info should report exclude patterns");
-    assert!(obj.contains_key("tracked_files"), "json info should report tracked files");
-    assert!(obj.contains_key("ignore_patterns"), "json info should report ignore patterns");
+    assert!(
+        obj.contains_key("initialized"),
+        "json info should report initialization state"
+    );
+    assert!(
+        obj.contains_key("exclude_patterns"),
+        "json info should report exclude patterns"
+    );
+    assert!(
+        obj.contains_key("tracked_files"),
+        "json info should report tracked files"
+    );
+    assert!(
+        obj.contains_key("ignore_patterns"),
+        "json info should report ignore patterns"
+    );
 }
 
 #[test]
@@ -377,8 +441,8 @@ fn info_json_on_uninitialized_repo_prints_initialized_false() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let value: serde_json::Value =
-        serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("info --json did not print valid JSON: {e}"));
+    let value: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("info --json did not print valid JSON: {e}"));
     assert!(
         value["initialized"] == serde_json::Value::Bool(false),
         "json info should report an uninitialized repository as `initialized: false`"
@@ -554,8 +618,7 @@ fn sync_after_deleting_repo_file_removes_it_from_overlay() {
     );
 
     // Delete the synced file from the repository, then sync again.
-    std::fs::remove_file(repo.join("hello.txt"))
-        .expect("failed to remove repo `hello.txt`");
+    std::fs::remove_file(repo.join("hello.txt")).expect("failed to remove repo `hello.txt`");
 
     let sync = run_sync(&repo);
     assert!(
@@ -572,9 +635,8 @@ fn sync_after_deleting_repo_file_removes_it_from_overlay() {
     );
 
     // The overlay's own config should no longer reference the file.
-    let overlay_config =
-        std::fs::read_to_string(overlay.join(".git-overlay.yml"))
-            .expect("failed to read overlay config");
+    let overlay_config = std::fs::read_to_string(overlay.join(".git-overlay.yml"))
+        .expect("failed to read overlay config");
     assert!(
         !overlay_config.contains("hello.txt"),
         "overlay config should no longer reference `hello.txt`, got:\n{overlay_config}"
@@ -885,6 +947,137 @@ fn sync_with_identical_file_in_both_repo_and_overlay_links_them() {
 }
 
 #[test]
+fn sync_force_overlay_keeps_overlay_copy_when_conflict() {
+    let dir = TestDir::new();
+    let (repo, overlay) = setup_conflicting_foo(&dir);
+
+    // `--force overlay` keeps the overlay copy and updates the repo to match.
+    let sync = run_sync_force(&repo, "overlay");
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync --force overlay` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
+        "overlay-foo",
+        "`--force overlay` should update the repository copy to the overlay's content"
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
+        "overlay-foo",
+        "`--force overlay` should keep the overlay copy"
+    );
+
+    // The two files are now hard links to the same (overlay) inode.
+    assert_same_inode(
+        &repo.join("foo.txt"),
+        &overlay.join("foo.txt"),
+        "`--force overlay`",
+    );
+
+    // And the file is managed / ignored by git.
+    assert_ignored(&repo, "foo.txt", "`--force overlay`");
+}
+
+#[test]
+fn sync_force_repository_keeps_repo_copy_when_conflict() {
+    let dir = TestDir::new();
+    let (repo, overlay) = setup_conflicting_foo(&dir);
+
+    // `--force repository` keeps the repository copy and updates the overlay
+    // to match.
+    let sync = run_sync_force(&repo, "repository");
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync --force repository` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
+        "repo-foo",
+        "`--force repository` should keep the repository copy"
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
+        "repo-foo",
+        "`--force repository` should update the overlay copy to the repository's content"
+    );
+
+    // The two files are now hard links to the same (repository) inode.
+    assert_same_inode(
+        &repo.join("foo.txt"),
+        &overlay.join("foo.txt"),
+        "`--force repository`",
+    );
+
+    // And the file is managed / ignored by git.
+    assert_ignored(&repo, "foo.txt", "`--force repository`");
+}
+
+#[test]
+fn sync_force_this_alias_keeps_repo_copy() {
+    let dir = TestDir::new();
+    let (repo, overlay) = setup_conflicting_foo(&dir);
+
+    // `this` is an alias for keeping the repository copy.
+    let sync = run_sync_force(&repo, "this");
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync --force this` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
+        "repo-foo",
+        "`--force this` should keep the repository copy"
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
+        "repo-foo",
+        "`--force this` should update the overlay copy to the repository's content"
+    );
+    assert_same_inode(
+        &repo.join("foo.txt"),
+        &overlay.join("foo.txt"),
+        "`--force this` alias",
+    );
+}
+
+#[test]
+fn sync_force_that_alias_keeps_overlay_copy() {
+    let dir = TestDir::new();
+    let (repo, overlay) = setup_conflicting_foo(&dir);
+
+    // `that` is an alias for keeping the overlay copy.
+    let sync = run_sync_force(&repo, "that");
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync --force that` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
+        "overlay-foo",
+        "`--force that` should keep the overlay copy"
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
+        "overlay-foo",
+        "`--force that` should update the repository copy to the overlay's content"
+    );
+    assert_same_inode(
+        &repo.join("foo.txt"),
+        &overlay.join("foo.txt"),
+        "`--force that` alias",
+    );
+}
+
+#[test]
 fn add_pattern_does_not_clobber_conflicting_overlay_file() {
     let dir = TestDir::new();
 
@@ -961,8 +1154,7 @@ fn ignore_add_puts_pattern_outside_managed_block_and_removes_it() {
         "ignore pattern should be written outside the managed block, got:\n{exclude}"
     );
 
-    let config =
-        std::fs::read_to_string(&config_path).expect("failed to read overlay config");
+    let config = std::fs::read_to_string(&config_path).expect("failed to read overlay config");
     assert!(
         config.contains("ignore_patterns") && config.contains("foo.txt"),
         "directory config should record the ignore pattern, got:\n{config}"
@@ -982,8 +1174,7 @@ fn ignore_add_puts_pattern_outside_managed_block_and_removes_it() {
         "ignore pattern should be gone from the exclude file, got:\n{exclude}"
     );
 
-    let config =
-        std::fs::read_to_string(&config_path).expect("failed to read overlay config");
+    let config = std::fs::read_to_string(&config_path).expect("failed to read overlay config");
     assert!(
         !config.contains("foo.txt"),
         "ignore pattern should be gone from the directory config, got:\n{config}"

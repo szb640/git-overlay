@@ -1,6 +1,6 @@
 pub mod base_repository;
 
-pub use base_repository::BaseRepository;
+pub use base_repository::{BaseRepository, ForceSide};
 
 pub mod directory_config;
 pub use directory_config::DirectoryConfig;
