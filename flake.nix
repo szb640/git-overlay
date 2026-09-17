@@ -29,7 +29,7 @@
 
           nativeBuildInputs = [ pkgs.git ];
 
-          cargoHash = "sha256-zHrbESsao05xeCCH+UUTr7QjPoq+9M8bnEoUF1bBSh0=";
+          cargoHash = "sha256-l4icYo3ZPRbV/wisu5y67FVqQ0RxlctiNqwWP2xgzTg=";
 
           meta = {
             description = cargoConfig.package.description;

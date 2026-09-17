@@ -1,6 +1,6 @@
 [package]
 name = "git-overlay"
-version = "0.0.4"
+version = "0.0.5"
 authors = [ "SzB640 <szb640@gmail.com>" ]
 description = "Software for overlaying personal files onto a git repository"
 edition = "2024"
