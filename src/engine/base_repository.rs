@@ -246,8 +246,10 @@ impl BaseRepository {
             let file = repo_root.join(rel);
             let dest = overlay_dir.join(rel);
             // If the overlay already holds its own copy at this path, moving
-            // the repo file over it would destroy the overlay's contents.
-            // Leave both in place and warn instead of clobbering.
+            // the repo file over it would destroy the overlay's contents. When
+            // the two copies disagree, leave both in place and warn instead of
+            // clobbering. When they match, make the repo file a hard link to
+            // the overlay copy so the overlay stays the source of truth.
             if dest.exists() {
                 if contents_differ(&dest, &file)? {
                     warn!(
@@ -255,6 +257,8 @@ impl BaseRepository {
                          contents; leaving both in place and ignoring it",
                         rel.display()
                     );
+                } else {
+                    relink_repo_to_overlay(&mut self.config, &dest, &file, &rel_str)?;
                 }
                 continue;
             }
@@ -363,7 +367,10 @@ impl BaseRepository {
                         rel.display()
                     );
                 } else {
-                    self.config.add_managed_file(rel.to_string_lossy().into_owned());
+                    // Identical contents: make the repository copy a hard link
+                    // to the overlay file and register it as managed.
+                    let rel_str = rel.to_string_lossy().into_owned();
+                    relink_repo_to_overlay(&mut self.config, &file, &dest, &rel_str)?;
                 }
                 continue;
             }
@@ -492,6 +499,28 @@ fn canonicalize(path: &PathBuf) -> Result<PathBuf, String> {
 
 /// Returns `Ok(true)` if two files have identical contents. Files that are
 /// hard links to the same inode trivially compare equal.
+fn relink_repo_to_overlay(
+    config: &mut RepositoryConfiguration,
+    overlay_file: &Path,
+    dest: &Path,
+    rel: &str,
+) -> Result<(), String> {
+    std::fs::remove_file(dest)
+        .map_err(|e| format!("failed to remove {}: {e}", dest.display()))?;
+    std::fs::hard_link(overlay_file, dest).map_err(|e| {
+        format!(
+            "failed to link {} to {}: {e}",
+            overlay_file.display(),
+            dest.display()
+        )
+    })?;
+    info!("linked {} to {}", dest.display(), overlay_file.display());
+    // The file now shares an inode with the overlay source; record it so a
+    // later `remove`/`sync` knows to drop it from the overlay again.
+    config.add_managed_file(rel.to_string());
+    Ok(())
+}
+
 fn contents_differ(a: &Path, b: &Path) -> Result<bool, String> {
     let a = std::fs::read(a).map_err(|e| format!("failed to read {}: {e}", a.display()))?;
     let b = std::fs::read(b).map_err(|e| format!("failed to read {}: {e}", b.display()))?;

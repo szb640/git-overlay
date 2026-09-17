@@ -816,6 +816,75 @@ fn sync_with_file_in_both_repo_and_overlay_keeps_both() {
 }
 
 #[test]
+fn sync_with_identical_file_in_both_repo_and_overlay_links_them() {
+    let dir = TestDir::new();
+
+    // An empty Git-managed repository and an empty overlay directory,
+    // initialized so the repo is managed.
+    let repo = dir.create_git_repo("repo");
+    let overlay = dir.create_dir("overlay");
+
+    let init = run_init(&repo, &overlay);
+    assert!(
+        init.status.success(),
+        "`git-overlay init` failed: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+
+    // A file that exists (independently) both in the repository and in the
+    // overlay with the same content, but is not yet managed.
+    dir.write_file(&repo, "foo.txt", "same");
+    dir.write_file(&overlay, "foo.txt", "same");
+
+    let sync = run_sync(&repo);
+    assert!(
+        sync.status.success(),
+        "`git-overlay sync` failed: {}",
+        String::from_utf8_lossy(&sync.stderr)
+    );
+
+    // Both copies remain, with identical content, and are now hard links to
+    // the same inode (the overlay file is the source of truth).
+    use std::os::unix::fs::MetadataExt;
+    let repo_ino = std::fs::metadata(repo.join("foo.txt"))
+        .expect("failed to stat repo `foo.txt`")
+        .ino();
+    let overlay_ino = std::fs::metadata(overlay.join("foo.txt"))
+        .expect("failed to stat overlay `foo.txt`")
+        .ino();
+    assert!(
+        repo_ino == overlay_ino,
+        "repo `foo.txt` (ino {repo_ino}) and overlay `foo.txt` (ino {overlay_ino}) \
+         should be hard links to the same inode after `sync`"
+    );
+
+    // Content is preserved on both sides.
+    assert_eq!(
+        std::fs::read_to_string(repo.join("foo.txt")).expect("failed to read repo `foo.txt`"),
+        "same",
+        "repository copy of `foo.txt` was changed by `sync`"
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("foo.txt")).expect("failed to read overlay `foo.txt`"),
+        "same",
+        "overlay copy of `foo.txt` was changed by `sync`"
+    );
+
+    // The file is registered as managed and ignored by git.
+    let status = Command::new("git")
+        .arg("check-ignore")
+        .arg("--quiet")
+        .arg("foo.txt")
+        .current_dir(&repo)
+        .status()
+        .expect("failed to run `git check-ignore`");
+    assert!(
+        status.success(),
+        "`foo.txt` should be ignored by git after `sync`"
+    );
+}
+
+#[test]
 fn add_pattern_does_not_clobber_conflicting_overlay_file() {
     let dir = TestDir::new();
 
